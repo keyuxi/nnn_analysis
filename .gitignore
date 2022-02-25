@@ -1,0 +1,9 @@
+
+# directories
+data/
+NNNlib2b-analysis/
+fig/
+
+# temporary stuffs 
+__*__/
+.ipynb*
