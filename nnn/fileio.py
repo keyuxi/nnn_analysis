@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os, json
 
-from util import *
+from .util import *
 
 def read_santalucia_df(santalucia_file):
     santa_lucia = pd.read_csv(santalucia_file, sep='\t')
@@ -22,19 +22,20 @@ def read_fitted_variant(filename, filter=True, annotation=None):
         df.rename(columns={'chisquared_all_clusters': 'chisq'}, inplace=True)
     df.rename(columns={s: s.replace('_final', '') for s in df.columns if s.endswith('_final')}, inplace=True)
 
-    # Add dG and chi2
+    # Add dG and chi2 for old versions
     if not 'dG_37' in df.columns:
-        df = add_dG_chi2_test(df)
+        df = add_dG_37(df)
+        
+    df = add_chisq_test(df)
 
-    # Add standard error columns for params
-    sqrt_n = np.sqrt(df['n_clusters'])
+    # Disambiguate standard error columns for params
     for c in df.columns:
         if (c.endswith('_std') and (not c.endswith('_norm_std'))):
-            df[c.replace('_std', '_se')] = df[c] / sqrt_n
+            df.rename(columns={c: c.replace('_std', '_se')}, inplace=True)
 
     # Filter variants
     if filter:
-        variant_filter = "n_clusters > 5 & dG_37_se < 0.2 & Tm_se < 2.5 & dH_se < 2.5 & RMSE < 0.5"
+        variant_filter = "n_clusters > 5 & dG_37_se < 2 & Tm_se < 25 & dH_se < 25 & RMSE < 0.5"
         df = filter_variant_table(df, variant_filter)
 
     if annotation is not None:
@@ -55,3 +56,20 @@ def read_annotation(annotation_file, mastertable_file):
     mastertable = pd.read_csv(mastertable_file, sep='\t')
     annotation = annotation.reset_index().merge(mastertable[['Series', 'ConstructClass']], on='Series', how='left').set_index('SEQID')
 
+    return annotation
+
+
+def read_melt_file(melt_file):
+    """
+    Args:
+        melt_file - str
+    Returns:
+        long-form dataframe, index not set
+    """
+    df = pd.read_csv(melt_file, header=1)
+    melt = pd.DataFrame(data=df.values[:,:2], columns=['Temperature_C', 'Abs'])
+    melt['ramp'] = 'melt'
+    anneal = pd.DataFrame(data=df.values[:,2:4], columns=['Temperature_C', 'Abs'])
+    anneal['ramp'] = 'anneal'
+    
+    return pd.concat((melt, anneal), axis=0)

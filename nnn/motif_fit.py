@@ -13,8 +13,8 @@ from sklearn.metrics import mean_squared_error
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.linear_model import LinearRegression, Lasso, Ridge
 
-from util import *
-import feature_list
+from .util import *
+from . import feature_list
 
 
 def search_GU_pairs(seq):
@@ -38,16 +38,33 @@ def get_model_metric(y, y_err, preds, n_feature):
     m['aic'] = n*np.log(rss/n) + 2*n_feature
     m['rmse'] = np.sqrt(np.mean(np.square(y - preds)))
     m['chi2'] = np.sqrt(np.mean(np.square(y - preds)/np.square(y_err)))
+    m['dof'] = n - n_feature
 
     return m
 
-def get_motif_se(X, res):
+def get_unknown_yerr_motif_se(X, res):
     """
     Calculate heteroskedasticity robust standard errors for fitted parameters
     """
     XT_X_1 = np.linalg.inv(X.T @ X)
     var_coef = XT_X_1 @ X.T @ np.diag(res**2) @ X @ XT_X_1
     return np.sqrt(np.diag(var_coef))
+
+
+def get_motif_se(X, y_err, singular_value_rel_thresh=0):
+    """
+    X is the feature matrix
+    """
+    A = X / y_err.values.reshape(-1,1)
+    print('Rank of the design matrix A is %d / %d'%(np.linalg.matrix_rank(A), A.shape[1]))
+
+    _,s,v = np.linalg.svd(A)
+    s_inv = 1/s
+    s_inv[s < s[0]*singular_value_rel_thresh] = 0
+    motif_se = np.sqrt(np.sum((v * s_inv.reshape(1,-1))**2, axis=1))
+
+    return motif_se
+
 
 def get_feature_count_matrix(df, feature_method='get_stack_feature_list', stack_size=2):
         """
@@ -70,7 +87,7 @@ def get_feature_count_matrix(df, feature_method='get_stack_feature_list', stack_
                 
         n_feature = len(feats.keys())
 
-        return feats, n_feature
+        return feats#, n_feature
 
 
 def fit_linear_motifs(df, feature_method='get_stack_feature_list',
@@ -88,42 +105,29 @@ def fit_linear_motifs(df, feature_method='get_stack_feature_list',
     coef_dfs=[]
     for i, stack_size in enumerate(stack_sizes):
         
-        feats, n_feature = get_feature_count_matrix(df, feature_method=feature_method, stack_size=stack_size)
-        
+        feats = get_feature_count_matrix(df, feature_method=feature_method, stack_size=stack_size)
+        n_feature = feats.shape[1]
         #Perform linear regression fit
         mdl = Ridge(fit_intercept=fit_intercept)
 
         X = feats.values
 
         results = cross_validate(mdl, X, y, cv=N_SPLITS, return_estimator=True)
-        coef_df = pd.DataFrame()
+        coef_df = pd.DataFrame(columns=['motif', param])
         for x in results['estimator']:
             for j in range(len(feats.columns)):
                 coef_df = coef_df.append({'motif': feats.columns[j], param: x.coef_[j]}, ignore_index=True)
-        coef_dfs.append(coef_df)
-
+        
         preds = cross_val_predict(mdl, X, y, cv=N_SPLITS)
-        
         df['tmp_pred'] = preds
-        m = get_model_metric(y, y_err, preds, n_feature)
-
-
-        N = X.shape[0]
-        p = X.shape[1] + 1  # plus one because LinearRegression adds an intercept term
-
-        X_with_intercept = np.empty(shape=(N, p), dtype=np.float)
-        X_with_intercept[:, 0] = 1
-        X_with_intercept[:, 1:p] = X
-
-        beta_hat = np.linalg.inv(X_with_intercept.T @ X_with_intercept) @ X_with_intercept.T @ y.values
-        
         residuals = y.values - preds
-        residual_sum_of_squares = residuals.T @ residuals
-        sigma_squared_hat = residual_sum_of_squares / (N - p)
-        var_beta_hat = np.linalg.inv(X_with_intercept.T @ X_with_intercept) * sigma_squared_hat
-        for p_ in range(p):
-            standard_error = var_beta_hat[p_, p_] ** 0.5
-            print(f"SE(beta_hat[{p_}]): {standard_error}")
+        motif_se = get_motif_se(X, y_err)
+        # coef_df[param+'_se'] = motif_se
+        print(motif_se)
+
+        coef_dfs.append(coef_df)
+        
+        m = get_model_metric(y, y_err, preds, n_feature)
 
         plt.subplot(1,3,stack_size)
         #errorbar(y, preds, xerr=y_err, fmt='.', alpha=0.1,zorder=0, color='k')
@@ -141,13 +145,60 @@ def fit_linear_motifs(df, feature_method='get_stack_feature_list',
 
         plt.tight_layout()
 
-    return coef_dfs, feats, preds, results
+    return coef_dfs, motif_se, feats, preds, results
+
+
+def fit_NN_cv(df, feature_method='get_stack_feature_list_simple_loop',
+           param='dG_37', err='_se_corrected', lim=None,
+           fit_intercept=False):
+
+
+    N_SPLITS = 5
+    y = df[param]
+    y_err = df[param + err]
+    y_weight = 1 / y_err**2
+
+    feats = get_feature_count_matrix(df, feature_method=feature_method, stack_size=2)
+    n_feature = feats.shape[1]
+
+    mdl = Ridge(fit_intercept=fit_intercept)
+    X = feats.values
+    results = cross_validate(mdl, X, y, cv=N_SPLITS, return_estimator=True, fit_params={'sample_weight': y_weight})
+    preds = cross_val_predict(mdl, X, y, cv=N_SPLITS)
+    m = get_model_metric(y, y_err, preds, n_feature)
+    motif_se = get_motif_se(X, y_err)
+
+    coef_df = pd.DataFrame(columns=['motif', param])
+    for estimator in results['estimator']:
+        for j in range(len(feats.columns)):
+            coef_df = coef_df.append({'motif': feats.columns[j], param: estimator.coef_[j]}, ignore_index=True)
+
+    motif_df = coef_df.groupby('motif').median()
+    motif_df[param+'_cv_std'] = coef_df.groupby('motif').std()
+    assert motif_df.index.tolist() == feats.columns.tolist()
+    motif_df[param+'_se'] = motif_se
+    df['tmp_pred'] = preds
+
+    hue_order = ['WC_5ntstem', 'WC_6ntstem', 'WC_7ntstem']
+    fig, ax = plt.subplots(figsize=(4,4))
+    sns.scatterplot(x=param, y='tmp_pred', data=df, hue='ConstructType', hue_order=hue_order,
+                    linewidth=0, s=10, alpha=0.5, palette='plasma', ax=ax)
+    plt.xlabel('Fit '+ param)
+    plt.ylabel('CV-test-split predicted '+param)
+    plt.title("%d features\n RMSE: %.2f, $\chi^2$: %.2f, \n BIC: %.2f" % (n_feature, m['rmse'], m['chi2'], m['bic']))
+
+    if lim is not None:
+        plt.plot(lim,lim,'--',color='grey',zorder=0)
+        plt.xlim(lim)
+        plt.ylim(lim)
+
+    return motif_df, feats
 
 
 def compare_fit_with_santalucia(df, santa_lucia, params=['dH', 'dS', 'dG_37']):
 
     for param in params:
-        coef_dfs, _, _ = fit_linear_motifs(df, param=param, err='_se', stack_sizes=[1,2,3])
+        coef_dfs, _, _ = fit_NN_cv(df, param=param, err='_se')
         fit_param = pd.DataFrame(coef_dfs[1].groupby('motif').apply(np.nanmean), columns=[param]).join(
              pd.DataFrame(coef_dfs[1].groupby('motif').apply(lambda x: np.nanstd(x)/np.sqrt(5)), columns=[param+'_cv_se']))
         santa_lucia = santa_lucia.merge(fit_param, on='motif', how='inner', suffixes=('_SantaLucia', '_MANIfold'))

@@ -8,19 +8,21 @@ from scipy.stats import chi2, pearsonr, norm
 from sklearn.metrics import r2_score
 from ipynb.draw import draw_struct
 
-from util import *
+from .util import *
 
 sns.set_style('ticks')
 sns.set_context('paper')
 
-palette=[
-    '#201615',
-    '#4e4c4f',
-    '#4c4e41',
-    '#936d60',
-    '#5f5556',
-    '#537692',
-    '#a3acb1']#cc.glasbey_dark
+# palette = ['#2f4f4f','#228b22','#00ff00','#000080','#1e90ff','#00ffff','#ff8c00','#deb887','#8b4513','#ff0000','#ff69b4','#800080',]
+palette = cc.glasbey_dark
+# palette=[
+#     '#201615',
+#     '#4e4c4f',
+#     '#4c4e41',
+#     '#936d60',
+#     '#5f5556',
+#     '#537692',
+#     '#a3acb1']#cc.glasbey_dark
 
 
 def plot_scatter_comparison(df, col, lim, color='#deb887'):
@@ -52,7 +54,7 @@ def plot_se_dist(df):
     sns.histplot(df.dH_se, kde=False, bins=30, color=palette[2], ax=ax[2])
 
 
-def plot_rep_comparison(r1, r2, param, lim, add_final=False, color='#deb887'):
+def plot_rep_comparison(r1, r2, param, lim, kind='kde', add_final=False, color='#deb887'):
     if add_final:
         col = param + '_final'
     else:
@@ -65,7 +67,11 @@ def plot_rep_comparison(r1, r2, param, lim, add_final=False, color='#deb887'):
     fig, ax = plt.subplots(figsize=(6,6))
     l = np.abs(lim[1] - lim[0])
     plt.plot(lim, lim, '--', c='gray')
-    sns.kdeplot(data=df, x=col+'_x', y=col+'_y', color=color)    
+    if kind == 'kde':
+        sns.kdeplot(data=df, x=col+'_x', y=col+'_y', color=color)
+    else:
+        sns.scatterplot(data=df, x=col+'_x', y=col+'_y', color=color)
+
     plt.xlim(lim)
     plt.ylim(lim)    
     plt.xlabel('r1')
@@ -203,7 +209,7 @@ def plot_renorm_actual_and_expected_fit(row, ax, c='k', conds=None):
     ax.set_title('%s, RMSE: %.3f  [%d%d]'% (row.name, row['RMSE'], row['enforce_fmax'], row['enforce_fmin']))
 
 
-def plot_NUPACK_curve(row, ax, T_celsius=np.arange(20,62.5,2.5), c='k', conds=None):
+def plot_NUPACK_curve(row, ax, T_celsius=np.arange(20,62.5,2.5), c='k'):
     function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*(Tm**-1 - x)))
 
     T_kelvin=[x+273.15 for x in T_celsius]
@@ -217,9 +223,15 @@ def plot_NUPACK_curve(row, ax, T_celsius=np.arange(20,62.5,2.5), c='k', conds=No
     ax.set_title('%s, NUPACK dH = %.2f, Tm = %.2f'% (row.name, row['dH_NUPACK'],row['Tm_NUPACK']))
 
 
-def plot_corrected_NUPACK_curve(row, ax, T_celsius=np.arange(20,62.5,2.5), c='k', conds=None):
+def plot_corrected_NUPACK_curve(row, ax, T_celsius=None, c='k', conds=None):
     function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*(Tm**-1 - x)))
 
+    if T_celsius is None:
+        T_celsius = np.arange(20,62.5,2.5)
+        ax.set_xlim([13,62])
+    else:
+        ax.set_xlim([np.min(T_celsius)-5, np.max(T_celsius)+5])
+        
     T_kelvin=[x+273.15 for x in T_celsius]
     T_inv = np.array([1/x for x in T_kelvin])
     GC_content = get_GC_content(row.RefSeq)
@@ -227,7 +239,7 @@ def plot_corrected_NUPACK_curve(row, ax, T_celsius=np.arange(20,62.5,2.5), c='k'
     pred_fit = function(row['dH_NUPACK'],Tm+273.15, 1, 0, T_inv)
     ax.plot(T_celsius, pred_fit, c=c, lw=3)
 
-    ax.set_xlim([13,62])
+    
     ax.set_ylim([-0.1,1.4])
 
     ax.set_title('%s, NUPACK dH = %.2f, Tm = %.2f'% (row.name, row['dH_NUPACK'],Tm))
@@ -243,3 +255,22 @@ def plot_candidate_variant_summary(candidate, df_with_targetstruct, df_with_curv
     cols = ['dH', 'Tm', 'dS', 'dG_37', 'dG_37_se_corrected', 'RMSE']
     print('\n====Fit Info===\n', df_with_targetstruct.loc[candidate,cols])
     print('\n%d clusters'%df_with_curve.loc[candidate,'n_clusters'])
+
+
+def plot_motif_param_errorbar(motif_df, param):
+    fig, ax = plt.subplots(figsize=(10,3))
+    plt.errorbar(range(len(motif_df)), motif_df[param], motif_df[param+'_se'], fmt='.')
+    plt.xticks(range(len(motif_df)), motif_df.index, rotation=20)
+    plt.title('WC $%s$ NN parameters' % param)
+
+
+def plot_fitting_evaluation(fitted_variant_df_list, legend, save_pdf_file=None):
+    for col in ['RMSE', 'rsqr', 'chisq', 'red_chisq', 'dH_se', 'Tm_se', 'dG_37_se', 'dS_se']:
+        plt.figure()
+        for i,df in enumerate(fitted_variant_df_list):
+            sns.kdeplot(df[col], color=palette[i])
+
+        plt.legend(legend)
+    
+    if save_pdf_file is not None:
+        save_multi_image(save_pdf_file)

@@ -5,7 +5,7 @@ import os
 import seaborn as sns
 from lmfit.models import PowerLawModel
 
-from util import *
+from .util import *
 
 sns.set_style('ticks')
 sns.set_context('paper')
