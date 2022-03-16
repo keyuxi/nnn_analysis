@@ -37,7 +37,7 @@ def get_model_metric(y, y_err, preds, n_feature):
     m['bic'] = n*np.log(rss/n) + n_feature*np.log(n) 
     m['aic'] = n*np.log(rss/n) + 2*n_feature
     m['rmse'] = np.sqrt(np.mean(np.square(y - preds)))
-    m['chi2'] = np.sqrt(np.mean(np.square(y - preds)/np.square(y_err)))
+    m['chi2'] = np.sqrt(np.mean(np.square(y - preds) / np.square(y_err)))
     m['dof'] = n - n_feature
 
     return m
@@ -123,7 +123,7 @@ def fit_linear_motifs(df, feature_method='get_stack_feature_list',
         residuals = y.values - preds
         motif_se = get_motif_se(X, y_err)
         # coef_df[param+'_se'] = motif_se
-        print(motif_se)
+        # print(motif_se)
 
         coef_dfs.append(coef_df)
         
@@ -148,7 +148,7 @@ def fit_linear_motifs(df, feature_method='get_stack_feature_list',
     return coef_dfs, motif_se, feats, preds, results
 
 
-def fit_NN_cv(df, feature_method='get_stack_feature_list_simple_loop',
+def fit_NN_cv(df, feature_method='get_stack_feature_list_simple_loop', stack_size=2,
            param='dG_37', err='_se_corrected', lim=None,
            fit_intercept=False):
 
@@ -158,7 +158,7 @@ def fit_NN_cv(df, feature_method='get_stack_feature_list_simple_loop',
     y_err = df[param + err]
     y_weight = 1 / y_err**2
 
-    feats = get_feature_count_matrix(df, feature_method=feature_method, stack_size=2)
+    feats = get_feature_count_matrix(df, feature_method=feature_method, stack_size=stack_size)
     n_feature = feats.shape[1]
 
     mdl = Ridge(fit_intercept=fit_intercept)
@@ -175,8 +175,8 @@ def fit_NN_cv(df, feature_method='get_stack_feature_list_simple_loop',
 
     motif_df = coef_df.groupby('motif').median()
     motif_df[param+'_cv_std'] = coef_df.groupby('motif').std()
-    assert motif_df.index.tolist() == feats.columns.tolist()
-    motif_df[param+'_se'] = motif_se
+    # assert motif_df.index.tolist() == feats.columns.tolist()
+    motif_df = motif_df.join(pd.DataFrame(data=motif_se, index=feats.columns, columns=[param+'_se']))
     df['tmp_pred'] = preds
 
     hue_order = ['WC_5ntstem', 'WC_6ntstem', 'WC_7ntstem']

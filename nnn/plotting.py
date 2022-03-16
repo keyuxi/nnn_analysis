@@ -91,7 +91,7 @@ def plot_rep_comparison_by_series(r1, r2, annotation, param, lim,
     fig, ax = plt.subplots(3,4,figsize=(20,15), sharex=True, sharey=True)
     ax = ax.flatten()
 
-    for i, s in enumerate(series.index):
+    for i, s in enumerate(series.index[:12]):
         series_df = df.query('Series == "%s"'%s)
         print('Series %s,  %d variants' % (s, len(series_df)))
         ax[i].plot(lim, lim, '--', c='gray')
@@ -255,6 +255,16 @@ def plot_candidate_variant_summary(candidate, df_with_targetstruct, df_with_curv
     cols = ['dH', 'Tm', 'dS', 'dG_37', 'dG_37_se_corrected', 'RMSE']
     print('\n====Fit Info===\n', df_with_targetstruct.loc[candidate,cols])
     print('\n%d clusters'%df_with_curve.loc[candidate,'n_clusters'])
+
+
+def draw_target_mfe_struct(row):
+    _, ax = plt.subplots(1,3,figsize=(9,3))
+    draw_struct(row.RefSeq, row.TargetStruct, ax=ax[0])
+    ax[0].set_title('Target')
+    draw_struct(row.RefSeq, row.mfe_struct_Na_50mM, ax=ax[1])
+    ax[1].set_title('MFE, 50mM $Na^+$')
+    draw_struct(row.RefSeq, row.mfe_struct_Na_1M, ax=ax[2])
+    ax[2].set_title('MFE, 1M $Na^+$')
 
 
 def plot_motif_param_errorbar(motif_df, param):

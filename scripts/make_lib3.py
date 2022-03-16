@@ -17,12 +17,33 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from collections import defaultdict
 
-import make_lib2 as lib2
+# import make_lib2 as lib2
 
 # hard-coded loop
 LOOP = 'GAAA'
 
 ##### HELPER FUNCTIONS #####
+def get_rc(seqlist): 
+    rcseq = []
+    
+    for seq in seqlist: 
+        cseq = ''
+        for c in seq[::-1].upper():
+            if c == 'A':
+                b = 'T'
+            elif c == 'T':
+                b = 'A'
+            elif c == 'G':
+                b = 'C'
+            elif c == 'C':
+                b = 'G'
+            cseq += b
+        newseq = seq + cseq
+        rcseq.append(newseq)
+    return rcseq
+
+
+
 def rcompliment(seq):
     complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', '-':'-'}
     return "".join(complement.get(base, base) for base in reversed(seq))
@@ -53,6 +74,16 @@ def is_stack_legal(var_stack):
     pass
 
     return is_legal
+
+def get_top_bottom_scaffold(scaffold, position='top'):
+    full_scaffold = scaffold + rcompliment(scaffold)
+    split = np.round(len(scaffold) / 4).astype(int)
+    if position == 'top':
+        return full_scaffold[split+1:-split-1]
+    elif position == 'bottom':
+        return full_scaffold[0:split+1] + full_scaffold[-split-1:]
+    else:
+        print('position must be top or bottom!')
 
 def add_scaffold_2_stacks(stacks, scaffold):
     """
@@ -191,15 +222,15 @@ if __name__ == '__main__':
      
     #define the scaffolds you want to test
     scaffolds = ['GC','CGCG','GATC']
-    scaffolds = lib2.get_rc(scaffolds)
+    scaffolds = get_rc(scaffolds)
 
     maxlength = 40
     # PKs = lib2.read_PK_file('short_pseudoknots.txt')
     
     #make all the variants for each scaffold
-    mismatch_all_3mer_lib = make_3mer_mismatches(scaffolds, add_loop=True)
-    write_lib_2_txt(r'../out/mismatch_all_3mer.txt', mismatch_all_3mer_lib, separate_scaffold=True)
+    # mismatch_all_3mer_lib = make_3mer_mismatches(scaffolds, add_loop=True)
+    # write_lib_2_txt(r'../out/mismatch_all_3mer.txt', mismatch_all_3mer_lib, separate_scaffold=True)
     
     #filter out the 3 mismatches ones
     mismatch_1and2_3mer_lib = make_3mer_mismatches(scaffolds, add_loop=True, filter_3_mismatches=True)
-    write_lib_2_txt(r'../out/mismatch_1and2_3mer.txt', mismatch_1and2_3mer_lib, separate_scaffold=True)
+    write_lib_2_txt(r'../out/mismatch_1and2_3mer.txt', mismatch_1and2_3mer_lib, separate_scaffold=False)

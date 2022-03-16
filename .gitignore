@@ -3,6 +3,7 @@
 data/
 NNNlib2b-analysis/
 fig/
+out/
 
 # temporary stuffs 
 __*__/

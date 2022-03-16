@@ -99,22 +99,27 @@ def add_chisq_test(df):
 
     return df
 
-def add_p_unfolded_NUPACK(df, T_celcius):
+def add_p_unfolded_NUPACK(df, T_celcius, sodium=1.0):
     """
     Calculate p_unfolded at T_celcius and add as a column to df
     """
     def get_p_unfolded(row):
-        return 1 / (1 + np.exp(row.dH_NUPACK/0.00198*((row.Tm_NUPACK + 273.15)**-1 - (T_celcius+273.15)**-1)))
+        Tm_NUPACK = get_NaCl_adjusted_Tm(row.Tm_NUPACK, row.dH_NUPACK, get_GC_content(row.RefSeq), Na=sodium)
+        return 1 / (1 + np.exp(row.dH_NUPACK/0.00198*((Tm_NUPACK + 273.15)**-1 - (T_celcius+273.15)**-1)))
 
     df['p_unfolded_%dC'%T_celcius] = df.apply(get_p_unfolded, axis=1)
 
     return df
 
+def get_symmetric_struct(len_seq, len_loop):
+    return '('*int((len_seq - len_loop)/2) + '.'*len_loop + ')'*int((len_seq - len_loop)/2)
+
 def get_target_struct(row):
-    def get_symmetric_struct(len_seq, len_loop):
-        return '('*int((len_seq - len_loop)/2) + '.'*len_loop + ')'*int((len_seq - len_loop)/2)
 
     def get_mismatch_struct(seq, mismatch_list):
+        """
+        Assumes all mismatches constructs are symmetric
+        """
         target_struct_list = list(get_symmetric_struct(len(seq), 4))
         for i in range(int((len(seq)-4)/2)):
             if seq[i] + seq[-1-i] in mismatch_list:
@@ -124,33 +129,34 @@ def get_target_struct(row):
         return target_struct
 
     series = row['Series']
+    construct_type = row['ConstructType']
     seq = row['RefSeq']
-    if series in ['WatsonCrick', 'TETRAloop', 'SuperStem']:
+    if series in ['WatsonCrick', 'TETRAloop'] or construct_type in ['BaeControls', 'SuperStem']:
         target_struct = get_symmetric_struct(len(seq), 4)
     elif series == 'TRIloop':
         target_struct = get_symmetric_struct(len(seq), 3)
-    elif series == 'VariableLoops':
+    elif series == 'VARloop':
         target_struct = get_symmetric_struct(len(seq), len(seq) - 4)
     elif series in ['REPeatControls', 'PolyNTControls']:
         target_struct = '.'* len(seq)
-    elif series == 'StemDangle':
-        stem_pos = seq.find('GCGCGAAAGCGC')
-        target_struct = '.'*stem_pos + get_symmetric_struct(12, 4) + '.'*int(len(seq) - stem_pos - 12)
-    elif series == 'MisMatchesACanyPos':
-        target_struct = get_mismatch_struct(seq, ['AC', 'CA'])
-    elif series == 'MisMatchesGTanyPos':
-        target_struct = get_mismatch_struct(seq, ['GT', 'TG'])
-    elif series == 'MisMatchesCentered':
+    elif construct_type.startswith('StemDangle'):
+        topScaffold = row['topScaffold']
+        stem_pos = seq.find(topScaffold[:len(topScaffold)//2])
+        target_struct = '.'*stem_pos + get_symmetric_struct(len(topScaffold) + 4, 4) + '.'*int(len(seq) - stem_pos - len(topScaffold) - 4)
+    elif series == 'MisMatches':
         mismatch_list = []
         for x in 'ATCG':
             for y in 'ATCG':
-                if not x+y in ['AT', 'TA', 'CG', 'GT']:
+                if not x+y in ['AT', 'TA', 'CG', 'GC']:
                     mismatch_list.append(x+y)
-
+        
         target_struct = get_mismatch_struct(seq, mismatch_list)
-
+    else:
+        # generated elsewhere
+        target_struct = '.'*len(seq)
 
     return target_struct
+
 
 def get_mfe_struct(seq, return_free_energy=False, verbose=False, celsius=0.0, sodium=1.0):
     my_model = nupack.Model(material='DNA', celsius=celsius, sodium=sodium, magnesium=0.0)
@@ -166,6 +172,40 @@ def get_mfe_struct(seq, return_free_energy=False, verbose=False, celsius=0.0, so
         return mfe_struct, mfe_structures[0].energy
     else:
         return mfe_struct
+
+
+def get_seq_ensemble_dG(seq, celsius, sodium=1.0, verbose=False):
+    my_model = nupack.Model(material='DNA', celsius=celsius, sodium=sodium, magnesium=0.0)
+    _, dG = nupack.pfunc(seq, model=my_model)
+    return dG
+
+
+def get_seq_structure_dG(seq, structure, celsius, sodium=1.0):
+    my_model = nupack.Model(material='DNA', celsius=celsius, sodium=sodium, magnesium=0.0)
+    return nupack.structure_energy([seq], structure=structure, model=my_model)
+
+
+def get_nupack_dH_dS_Tm_dG_37(seq, struct):
+    '''Return dH (kcal/mol), dS(kcal/mol), Tm (˚C), dG_37(kcal/mol)'''
+    T1=0
+    T2=50
+
+    dG_37 = get_seq_structure_dG(seq, struct, 37)
+
+    dG_1 = get_seq_structure_dG(seq, struct, T1)
+    dG_2 = get_seq_structure_dG(seq, struct, T2)
+
+    dS = -1*(dG_2 - dG_1)/(T2 - T1)
+    assert((dG_1 + dS*(T1+273.15)) - (dG_2 + dS*(T2+273.15)) < 1e-6)
+    
+    dH = dG_1 + dS*(T1+273.15)
+    
+    if dS != 0:
+        Tm = (dH/dS) - 273.15 # to convert to ˚C
+    else:
+        Tm = np.nan
+    
+    return dH, dS, Tm, dG_37
 
 
 """
