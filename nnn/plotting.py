@@ -3,12 +3,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os, json
 import seaborn as sns
-import colorcet as cc
 from scipy.stats import chi2, pearsonr, norm
 from sklearn.metrics import r2_score
 from ipynb.draw import draw_struct
 
 from .util import *
+from . import util
 
 sns.set_style('ticks')
 sns.set_context('paper')
@@ -55,6 +55,10 @@ def plot_se_dist(df):
 
 
 def plot_rep_comparison(r1, r2, param, lim, kind='kde', add_final=False, color='#deb887'):
+    """
+    Args:
+        kind - {'kde', 'scatter', 'kde_scatter'}
+    """
     if add_final:
         col = param + '_final'
     else:
@@ -69,8 +73,12 @@ def plot_rep_comparison(r1, r2, param, lim, kind='kde', add_final=False, color='
     plt.plot(lim, lim, '--', c='gray')
     if kind == 'kde':
         sns.kdeplot(data=df, x=col+'_x', y=col+'_y', color=color)
-    else:
+    elif kind == 'scatter':
         sns.scatterplot(data=df, x=col+'_x', y=col+'_y', color=color)
+    elif kind == 'kde_scatter':
+        sns.scatterplot(data=df, x=col+'_x', y=col+'_y', color=color)
+        sns.kdeplot(data=df, x=col+'_x', y=col+'_y', color=color, fill=True)
+
 
     plt.xlim(lim)
     plt.ylim(lim)    
@@ -154,8 +162,61 @@ def plot_rep_comparison_by_ConstructType(r1, r2, annotation, param, series, lim,
 
     return fig, ax
 
+
+def plot_nupack_comparison_by_series(vf, param, sodium=0.75,
+    annotation=None, lim=None):
+    df = vf.copy()
+    if annotation is not None:
+        df = df.join(annotation)
+        
+    if param in ['dG_37', 'Tm']:
+        suffix = '_NUPACK_salt_corrected'
+        df['GC'] = df.RefSeq.apply(get_GC_content)
+        df['Tm_NUPACK_salt_corrected'] = df.apply(lambda row: util.get_Na_adjusted_Tm(Tm=row.Tm_NUPACK, dH=row.dH_NUPACK, GC=row.GC, Na=sodium), axis=1)
+    else:
+        suffix = '_NUPACK'
+
+    if param == 'dG_37':
+        df['dG_37_NUPACK_salt_corrected'] = df.apply(lambda row: get_dG(dH=row.dH_NUPACK, Tm=row.Tm_NUPACK_salt_corrected+273.15, celsius=37), axis=1)
+
+    df.loc[df.Series == 'External', 'Series'] = 'Control'
+
+    series = df.groupby('Series').apply(len).sort_values(ascending=False)
+    l = np.abs(lim[1] - lim[0])
+
+    fig, ax = plt.subplots(2,3,figsize=(15,10), sharex=True, sharey=True)
+    ax = ax.flatten()
+
+    for i, s in enumerate(series.index[:12]):
+        series_df = df.query('Series == "%s"'%s)
+        print('Series %s,  %d variants' % (s, len(series_df)))
+        ax[i].plot(lim, lim, '--', c='gray')
+        if len(series_df) > 100:
+            sns.scatterplot(data=series_df, x=param+suffix, y=param,
+                color=palette[i % len(palette)], alpha=.1, ax=ax[i])
+            sns.kdeplot(data=series_df, x=param+suffix, y=param,
+                color=palette[i % len(palette)], fill=False, ax=ax[i])
+            rsqr = r2_score(series_df[param+suffix], series_df[param])
+            pearson, _ = pearsonr(series_df[param+suffix], series_df[param])
+            ax[i].text(lim[0] + 0.1*l, lim[1] - 0.1*l, r'$R^2 = %.3f$'%rsqr, va='bottom')
+            ax[i].text(lim[0] + 0.1*l, lim[1] - 0.15*l, r"$Pearson's\ r = %.3f$"%pearson, va='bottom')
+        else:
+            sns.scatterplot(data=series_df, x=param+suffix, y=param,
+                color=palette[i % len(palette)], ax=ax[i])
+
+        ax[i].set_xlim(lim)
+        ax[i].set_ylim(lim)    
+        ax[i].set_xlabel('NUPACK')
+        ax[i].set_ylabel('MANifold')
+        ax[i].set_title('%s, N=%d'%(s, series[s]))
+
+    plt.suptitle(param)
+
+    return df
+
+
 def plot_actual_and_expected_fit(row, ax, c='k', conds=None):
-    function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*(Tm**-1 - x)))
+    function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*((Tm+273.15)**-1 - x)))
     if conds is None:
         conds = [x for x in row.keys() if x.endswith('_norm')]
         
@@ -178,12 +239,13 @@ def plot_actual_and_expected_fit(row, ax, c='k', conds=None):
     ax.plot(T_celsius, pred_fit, c=c, lw=3)
     ax.set_title('%s, RMSE: %.3f  [%d%d]'% (row.name, row['RMSE'], row['enforce_fmax'], row['enforce_fmin']))
 
+
 def plot_renorm_actual_and_expected_fit(row, ax, c='k', conds=None):
     """
     Re-normalized to between 0 and 1
     NOT TESTED
     """
-    function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*(Tm**-1 - x)))
+    function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*((Tm+273.15)**-1 - x)))
     renorm = lambda x, fmax, fmin: x / (fmax - fmin)  - fmin
     if conds is None:
         conds = [x for x in row.keys() if x.endswith('_norm')]
@@ -201,8 +263,8 @@ def plot_renorm_actual_and_expected_fit(row, ax, c='k', conds=None):
     T_inv = np.array([1/x for x in T_kelvin])
     pred_fit = function(row['dH'],row['Tm'], 1, 0, T_inv)
     
-    ax.set_xlim([13,62])
-    ax.set_ylim([-0.1,1.4])
+    ax.set_xlim([18,62])
+    ax.set_ylim([-0.1,1.1])
 
     ax.errorbar(T_celsius, vals, yerr=errors,fmt='.',c=c)
     ax.plot(T_celsius, pred_fit, c=c, lw=3)
@@ -210,11 +272,11 @@ def plot_renorm_actual_and_expected_fit(row, ax, c='k', conds=None):
 
 
 def plot_NUPACK_curve(row, ax, T_celsius=np.arange(20,62.5,2.5), c='k'):
-    function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*(Tm**-1 - x)))
+    function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*((Tm+273.15)**-1 - x)))
 
     T_kelvin=[x+273.15 for x in T_celsius]
     T_inv = np.array([1/x for x in T_kelvin])
-    pred_fit = function(row['dH_NUPACK'],row['Tm_NUPACK']+273.15, 1, 0, T_inv)
+    pred_fit = function(row['dH_NUPACK'],row['Tm_NUPACK'], 1, 0, T_inv)
     ax.plot(T_celsius, pred_fit, c=c, lw=3)
 
     ax.set_xlim([13,62])
@@ -223,8 +285,8 @@ def plot_NUPACK_curve(row, ax, T_celsius=np.arange(20,62.5,2.5), c='k'):
     ax.set_title('%s, NUPACK dH = %.2f, Tm = %.2f'% (row.name, row['dH_NUPACK'],row['Tm_NUPACK']))
 
 
-def plot_corrected_NUPACK_curve(row, ax, T_celsius=None, c='k', conds=None):
-    function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*(Tm**-1 - x)))
+def plot_corrected_NUPACK_curve(row, ax, T_celsius=None, c='k', conds=None, sodium=1.0):
+    function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*((Tm+273.15)**-1 - x)))
 
     if T_celsius is None:
         T_celsius = np.arange(20,62.5,2.5)
@@ -235,8 +297,8 @@ def plot_corrected_NUPACK_curve(row, ax, T_celsius=None, c='k', conds=None):
     T_kelvin=[x+273.15 for x in T_celsius]
     T_inv = np.array([1/x for x in T_kelvin])
     GC_content = get_GC_content(row.RefSeq)
-    Tm = get_NaCl_adjusted_Tm(row['Tm_NUPACK'], row['dH_NUPACK'], GC_content)
-    pred_fit = function(row['dH_NUPACK'],Tm+273.15, 1, 0, T_inv)
+    Tm = get_Na_adjusted_Tm(row['Tm_NUPACK'], row['dH_NUPACK'], GC_content, Na=sodium)
+    pred_fit = function(row['dH_NUPACK'],Tm, 1, 0, T_inv)
     ax.plot(T_celsius, pred_fit, c=c, lw=3)
 
     

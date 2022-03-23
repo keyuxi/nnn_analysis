@@ -4,6 +4,10 @@ data/
 NNNlib2b-analysis/
 fig/
 out/
+nnn_fitting/
+
+# testing
+fmax_fmin.sh
 
 # temporary stuffs 
 __*__/

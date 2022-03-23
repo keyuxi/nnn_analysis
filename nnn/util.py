@@ -35,6 +35,11 @@ palette=[
 
 
 def save_fig(filename, fig=None):
+
+    figdir, _ = os.path.split(filename)
+    if not os.path.isdir(figdir):
+        os.makedirs(figdir)
+
     if fig is None:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
     else:
@@ -62,15 +67,15 @@ def filter_variant_table(df, variant_filter):
 
 
 def get_GC_content(seq):
-    return 100 * np.sum([s in ['G','C'] for s in seq]) / len(seq)
+    return 100 * np.sum([s in ['G','C'] for s in str(seq)]) / len(str(seq))
 
 
-def get_NaCl_adjusted_Tm(Tm, dH, GC, Na=0.025, from_Na=1.0):
+def get_Na_adjusted_Tm(Tm, dH, GC, Na=0.075, from_Na=1.0):
     Tmadj = Tm + (-3.22*GC/100 + 6.39)*(np.log(Na/from_Na))
     return Tmadj
 
-def get_dG(dH, Tm, t):
-    return dH * (1 - (273.15 + t) / Tm)
+def get_dG(dH, Tm, celsius):
+    return dH * (1 - (273.15 + celsius) / (273.15 + Tm))
     
 def get_dof(row):
     n_T = len(np.arange(20, 62.5, 2.5))
@@ -104,7 +109,7 @@ def add_p_unfolded_NUPACK(df, T_celcius, sodium=1.0):
     Calculate p_unfolded at T_celcius and add as a column to df
     """
     def get_p_unfolded(row):
-        Tm_NUPACK = get_NaCl_adjusted_Tm(row.Tm_NUPACK, row.dH_NUPACK, get_GC_content(row.RefSeq), Na=sodium)
+        Tm_NUPACK = get_Na_adjusted_Tm(row.Tm_NUPACK, row.dH_NUPACK, get_GC_content(row.RefSeq), Na=sodium)
         return 1 / (1 + np.exp(row.dH_NUPACK/0.00198*((Tm_NUPACK + 273.15)**-1 - (T_celcius+273.15)**-1)))
 
     df['p_unfolded_%dC'%T_celcius] = df.apply(get_p_unfolded, axis=1)
@@ -157,6 +162,25 @@ def get_target_struct(row):
 
     return target_struct
 
+def get_curve_pred(row, conds=None):
+    function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*(Tm**-1 - x)))
+    if conds is None:
+        conds = [x for x in row.keys() if x.endswith('_norm')]
+        
+        errs = [x for x in row.keys() if x.endswith('_norm_std')]
+    else:
+        errs = [x+'_std' for x in conds]
+
+    vals = np.array(row[conds].values,dtype=float) 
+    errors = np.array(row[errs].values / np.sqrt(row['n_clusters']),dtype=float)
+
+    T_celsius=[float(x.split('_')[1]) for x in conds]
+    T_kelvin=[x+273.15 for x in T_celsius]
+    T_inv = np.array([1/x for x in T_kelvin])
+    pred_fit = function(row['dH'],row['Tm'], row['fmax'], row['fmin'], T_inv)
+
+    return pred_fit, vals, errors
+
 
 def get_mfe_struct(seq, return_free_energy=False, verbose=False, celsius=0.0, sodium=1.0):
     my_model = nupack.Model(material='DNA', celsius=celsius, sodium=sodium, magnesium=0.0)
@@ -207,8 +231,11 @@ def get_nupack_dH_dS_Tm_dG_37(seq, struct):
     
     return dH, dS, Tm, dG_37
 
+def is_diff_nupack(df, param):
+    return df.apply(lambda row: (row[param+'_lb'] > row[param+'_NUPACK_salt_corrected']) or (row[param+'_ub'] < row[param+'_NUPACK_salt_corrected']), axis=1)
 
 """
+# Old nupack dH dS Tm code, has problems
 def calc_dH_dS_Tm(seq, package='nupack',dna=True):
     '''Return dH (kcal/mol), dS(kcal/mol), Tm (˚C)'''
 
