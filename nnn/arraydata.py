@@ -36,8 +36,8 @@ class ArrayData(object):
         lib_name - str, 'nnn_lib2b'
         n_rep - int
         buffer - Dict[str: value], {'sodium': float, in M}
-        data - pd.DataFrame, each row is a variant, contains fitted parameters from individual replicates,
-               n_clusters, combined and corrected parameters
+        data_all - df, all shitty columns
+        data - df, just the clean combined parameters
         curve - dict of pd.DataFrame, keys are replicate,
                 levels are variant-replicate-median/se-temperature. 
                 Green normed data.
@@ -62,11 +62,14 @@ class ArrayData(object):
         self.lib_name = lib_name
         self.replicate_df = replicate_df
         self.n_rep = len(replicate_df)
+
+        assert np.all(np.isclose(replicate_df['sodium'], replicate_df['sodium'][0])), "Sodium concentration not equal in the replicates"
+        self.buffer = {'sodium': replicate_df['sodium'][0]}
         
-        self.annotation = fileio.read_annotation(annotation_file)
+        self.annotation = fileio.read_annotation(annotation_file, sodium=self.buffer['sodium'])
         if filter_misfold:
             pass
-        self.data, self.curve = self.read_data()
+        self.data_all, self.curve, self.curve_se = self.read_data()
 
         if error_adjust is not None:
             self.error_adjust = error_adjust
@@ -74,35 +77,55 @@ class ArrayData(object):
             if learn_error_adjust_from is None:
                 raise Exception('Need to give `learn_error_adjust_from` if no ErrorAdjust is given!')
             else:
-                self.error_adjust = ErrorAdjust()
+                self.error_adjust = self.learn_error_adjust_function(learn_error_adjust_from)
+
+        self.data = self.data_all[[c for c in self.data_all.columns if not ('-' in c)]]
 
 
 
 
     def read_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         
-        reps = [fileio.read_fitted_variant(fn) for fn in self.replicate_df.filename] # List[DataFrame]
-        conds = [exec(get_cond) for rep,get_cond in zip(reps, self.replicate_df.get_cond)] # List[List[str]]
+        reps = [fileio.read_fitted_variant(fn, add_chisq_test=False, annotation=None) for fn in self.replicate_df.filename] # List[DataFrame]
+        
+        conds = []
+        for rep, drop_last, reverse in zip(reps, self.replicate_df.drop_last, self.replicate_df.reverse):
+            cond = [x for x in rep.columns if x.endswith('_norm')]
+            if drop_last:
+                cond = cond[:-1]
+            if reverse:
+                cond = cond[::-1]
+            conds.append(cond)
 
-        data = processing.combine_replicates(reps, self.replicate_df['name'])
+        data = processing.combine_replicates(reps, self.replicate_df['name'].tolist(), verbose=False)
         curves = {rep_name: rep[cond] for rep, rep_name, cond in zip(reps, self.replicate_df['name'], conds)}
+        curves_se = {rep_name: rep[[c+'_std' for c in cond]].rename(columns=lambda c: c.replace("_std", "_se")) / np.sqrt(rep['n_clusters']).values.reshape(-1,1)
+            for rep, rep_name, cond in zip(reps, self.replicate_df['name'], conds)}
+        return data, curves, curves_se
 
-        return data, curves
 
 
-
-    def get_replicate_data(self, replicate: str, attach_annotation: bool = False) -> pd.DataFrame:
+    def get_replicate_data(self, replicate_name: str, attach_annotation: bool = False, verbose=True) -> pd.DataFrame:
         """
         Lower level, returns the original df of fitted variant data
         Compatible with older functions
         """
-        filename = self.replicate_df.loc[self.replicate_df['replicate'] == replicate, 'filename']
+        # assert replicate_name in self.replicate_df['name'], "Invalid replicate name"
+        filename = self.replicate_df.loc[self.replicate_df.name == replicate_name, 'filename'].values[0]
+        if verbose:
+            print('Load from file', filename)
         if attach_annotation:
             annotation = self.annotation
         else:
             annotation = None
 
-        return fileio.read_fitted_variant(filename, filter=True, annotation=annotation)
+        return fileio.read_fitted_variant(filename, filter=True, annotation=annotation, sodium=self.buffer['sodium'])
 
-    def get_error_adjust_function(self):
-        return self.error_adjust
+    def learn_error_adjust_function(self, learn_error_adjust_from, debug=False, figdir='./fig/error_adjust'):
+        r1_name, r2_name = learn_error_adjust_from
+        r1, r2 = self.get_replicate_data(r1_name), self.get_replicate_data(r2_name)
+
+        error_adjust = ErrorAdjust()
+        error_adjust.A, error_adjust.k = processing.correct_interexperiment_error(r1, r2, figdir=figdir, return_debug=debug)
+
+        return error_adjust

@@ -12,8 +12,10 @@ def read_santalucia_df(santalucia_file):
     
     return santa_lucia
 
-def read_fitted_variant(filename, filter=True, annotation=None, sodium=0.075):
+def read_fitted_variant(filename, filter=True, annotation=None,
+                        add_chisq_test=True, sodium=0.075):
     """
+    Overwrites salt correction in the annotation df with sodium conc
     Args:
         annotation - df, if given, merge onto fitted variant file
         filter - Bool
@@ -26,8 +28,9 @@ def read_fitted_variant(filename, filter=True, annotation=None, sodium=0.075):
     # Add dG and chi2 for old versions
     if not 'dG_37' in df.columns:
         df = util.add_dG_37(df)
-        
-    df = util.add_chisq_test(df)
+    if add_chisq_test:
+        pass
+        # df = util.add_chisq_test(df)
 
     # Change all temperatures into celsius to avoid headaches later
     for col in ['Tm', 'Tm_lb', 'Tm_ub']:
@@ -56,7 +59,7 @@ def read_fitted_variant(filename, filter=True, annotation=None, sodium=0.075):
     return df
 
 
-def read_annotation(annotation_file, mastertable_file=None):
+def read_annotation(annotation_file, mastertable_file=None, sodium=None):
     """
     Older version required giving mastertable and merging. 
     Latest version simply reads in the annotation file.
@@ -72,6 +75,15 @@ def read_annotation(annotation_file, mastertable_file=None):
     if mastertable_file is not None:
         mastertable = pd.read_csv(mastertable_file, sep='\t')
         annotation = annotation.reset_index().merge(mastertable[['Series', 'ConstructClass']], on='Series', how='left').set_index('SEQID')
+
+    if sodium is not None:
+        annotation['GC'] = annotation.RefSeq.apply(util.get_GC_content)
+        annotation['Tm_NUPACK_salt_corrected'] = annotation.apply(lambda row: util.get_Na_adjusted_Tm(Tm=row.Tm_NUPACK, dH=row.dH_NUPACK, GC=row.GC, Na=sodium), axis=1)
+        annotation['dG_37_NUPACK_salt_corrected'] = annotation.apply(lambda row: util.get_dG(dH=row.dH_NUPACK, Tm=row.Tm_NUPACK_salt_corrected, celsius=37), axis=1)
+        
+        for param in ['dH', 'dS']:
+            annotation[param+'_NUPACK_salt_corrected'] = annotation[param+'_NUPACK']
+
 
     return annotation
 
