@@ -23,14 +23,38 @@ palette = cc.glasbey_dark
 #     '#5f5556',
 #     '#537692',
 #     '#a3acb1']#cc.glasbey_dark
+from scipy.stats import gaussian_kde
+
+def calc_kde_pdf(data):
+    """
+    Args:
+        data - (n_points, n_dim)
+    Returns:
+        (n_points)
+    """
+    kde = gaussian_kde(data.dropna().T)
+    return kde.evaluate(data.T)
 
 
-def plot_scatter_comparison(df, col, lim, color='#deb887'):
-    fig, ax = plt.subplots(figsize=(6,6))
-    sns.scatterplot(data=df, x=col, y=col+'_final', color=color)
-    plt.plot(lim, lim, 'k--')
-    plt.xlim(lim)
-    plt.ylim(lim)
+def plot_colored_scatter_comparison(data, x, y, 
+                                    palette='plasma', alpha=1, ax=None, lim=None):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6,6))
+
+    if lim is not None:
+        ax.plot(lim, lim, 'k--', zorder=0)
+        ax.set_xlim(lim)
+        ax.set_ylim(lim)
+
+    df = data.copy()
+    df['density'] = calc_kde_pdf(data[[x,y]])
+    # df['size'] = 200#100 / data[x]**2
+    sns.scatterplot(data=df, x=x, y=y, hue='density', #size='size',
+                    palette=palette, alpha=alpha, legend=False, ax=ax)
+
+def generate_color_palette(index):
+    # return sns.dark_palette(sns.color_palette('Set2', 4)[index], reverse=False, as_cmap=True)
+    return sns.dark_palette(cc.glasbey_light[index], reverse=False, as_cmap=True)
     
 def plot_kde_comparison(df, col, lim, color='#8b4513'):
     fig, ax = plt.subplots(figsize=(6,6))
@@ -163,56 +187,97 @@ def plot_rep_comparison_by_ConstructType(r1, r2, annotation, param, series, lim,
     return fig, ax
 
 
-def plot_nupack_comparison_by_series(vf, param, sodium=0.75,
-    annotation=None, lim=None):
+def plot_comparison_by_series(vf, param, suffix = '_NUPACK_salt_corrected',
+    annotation=None, lim=None, xlabel=None, ylabel=None):
+
     df = vf.copy()
     if annotation is not None:
         df = df.join(annotation)
         
-    if param in ['dG_37', 'Tm']:
-        suffix = '_NUPACK_salt_corrected'
-        df['GC'] = df.RefSeq.apply(get_GC_content)
-        df['Tm_NUPACK_salt_corrected'] = df.apply(lambda row: util.get_Na_adjusted_Tm(Tm=row.Tm_NUPACK, dH=row.dH_NUPACK, GC=row.GC, Na=sodium), axis=1)
-    else:
-        suffix = '_NUPACK'
-
-    if param == 'dG_37':
-        df['dG_37_NUPACK_salt_corrected'] = df.apply(lambda row: get_dG(dH=row.dH_NUPACK, Tm=row.Tm_NUPACK_salt_corrected+273.15, celsius=37), axis=1)
-
     df.loc[df.Series == 'External', 'Series'] = 'Control'
+    df.loc[df.Series == 'TRIloop', 'Series'] = 'Hairpin Loops'
+    df.loc[df.Series == 'TETRAloop', 'Series'] = 'Hairpin Loops'
 
-    series = df.groupby('Series').apply(len).sort_values(ascending=False)
+    series = df.query('Series != "Control"').groupby('Series').apply(len).sort_values(ascending=False)
+    print(series)
     l = np.abs(lim[1] - lim[0])
 
-    fig, ax = plt.subplots(2,3,figsize=(15,10), sharex=True, sharey=True)
+    fig, ax = plt.subplots(2,2,figsize=(10,10), sharex=False, sharey=False)
     ax = ax.flatten()
 
-    for i, s in enumerate(series.index[:12]):
-        series_df = df.query('Series == "%s"'%s)
+    for i, s in enumerate(series.index[:4]):
+        series_df = df.query('Series == "%s"'%s)[[param+suffix, param]].dropna(subset=[param, param+suffix])
         print('Series %s,  %d variants' % (s, len(series_df)))
-        ax[i].plot(lim, lim, '--', c='gray')
+        ax[i].plot(lim, lim, '--', c='gray', zorder=0)
         if len(series_df) > 100:
+            # plot_colored_scatter_comparison(data=series_df, x=param+suffix, y=param,
+            #     lim=lim, palette=generate_color_palette(i), ax=ax[i])
             sns.scatterplot(data=series_df, x=param+suffix, y=param,
                 color=palette[i % len(palette)], alpha=.1, ax=ax[i])
-            sns.kdeplot(data=series_df, x=param+suffix, y=param,
-                color=palette[i % len(palette)], fill=False, ax=ax[i])
-            rsqr = r2_score(series_df[param+suffix], series_df[param])
+            # sns.kdeplot(data=series_df, x=param+suffix, y=param,
+            #     color=palette[i % len(palette)], fill=False, ax=ax[i])
+            # rsqr = r2_score(series_df[param+suffix], series_df[param])
             pearson, _ = pearsonr(series_df[param+suffix], series_df[param])
-            ax[i].text(lim[0] + 0.1*l, lim[1] - 0.1*l, r'$R^2 = %.3f$'%rsqr, va='bottom')
+            # ax[i].text(lim[0] + 0.1*l, lim[1] - 0.1*l, r'$R^2 = %.3f$'%rsqr, va='bottom')
             ax[i].text(lim[0] + 0.1*l, lim[1] - 0.15*l, r"$Pearson's\ r = %.3f$"%pearson, va='bottom')
         else:
+            # plot_colored_scatter_comparison(data=series_df, x=param+suffix, y=param,
+            #     lim=lim, palette=generate_color_palette(i))
             sns.scatterplot(data=series_df, x=param+suffix, y=param,
+                color=palette[i % len(palette)], ax=ax[i])
+
+        ax[i].set_xlim(lim)
+        ax[i].set_ylim(lim)
+        if xlabel is None:
+            xlabel = 'NUPACK $dG_{37}$ (kcal/mol)' 
+        if ylabel is None:
+            ylabel = 'MANifold $dG_{37}$ (kcal/mol)'
+        ax[i].set_xlabel(xlabel)
+        ax[i].set_ylabel(ylabel)
+        ax[i].set_title('%s, N=%d'%(s, series[s]))
+
+    plt.suptitle(param)
+
+    return fig, ax
+
+
+def plot_comparison_by_type(vf, param, suffix = '_NUPACK_salt_corrected',
+    series='WatsonCrick', annotation=None, lim=None):
+    df = vf.query(f'Series == "{series}"').copy()
+    if annotation is not None:
+        df = df.join(annotation)
+        
+    construct_types = df.groupby('ConstructType').apply(len).sort_values(ascending=False)
+    fig, ax = plt.subplots(2,3,figsize=(15,10), sharex=False, sharey=False)
+    ax = ax.flatten()
+    l = np.abs(lim[1] - lim[0])
+
+    for i, s in enumerate(construct_types.index[:12]):
+        type_df = df.query('ConstructType == "%s"'%s)
+        print('Construct Type %s,  %d variants' % (s, len(type_df)))
+        ax[i].plot(lim, lim, '--', c='gray')
+        if len(type_df) > 40:
+            sns.scatterplot(data=type_df, x=param+suffix, y=param,
+                color=palette[i % len(palette)], alpha=.1, ax=ax[i])
+            sns.kdeplot(data=type_df, x=param+suffix, y=param,
+                color=palette[i % len(palette)], fill=False, ax=ax[i])
+            # rsqr = r2_score(type_df[param+suffix], type_df[param])
+            pearson, _ = pearsonr(type_df[param+suffix], type_df[param])
+            # ax[i].text(lim[0] + 0.1*l, lim[1] - 0.1*l, r'$R^2 = %.3f$'%rsqr, va='bottom')
+            ax[i].text(lim[0] + 0.1*l, lim[1] - 0.15*l, r"$Pearson's\ r = %.3f$"%pearson, va='bottom')
+        else:
+            sns.scatterplot(data=type_df, x=param+suffix, y=param,
                 color=palette[i % len(palette)], ax=ax[i])
 
         ax[i].set_xlim(lim)
         ax[i].set_ylim(lim)    
         ax[i].set_xlabel('NUPACK')
         ax[i].set_ylabel('MANifold')
-        ax[i].set_title('%s, N=%d'%(s, series[s]))
+        ax[i].set_title('%s, N=%d'%(s, construct_types[s]))
 
     plt.suptitle(param)
 
-    return df
+    return fig, ax
 
 
 def plot_actual_and_expected_fit(row, ax, c='k', conds=None):

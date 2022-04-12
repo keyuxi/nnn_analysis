@@ -145,7 +145,7 @@ def correct_interexperiment_error(r1, r2, plot=True, figdir=None, return_debug=F
         df[f'd{param}_zscore'], df[f'd{param}_se'], offset[f'{param}'] = get_combined_ddX(df[f'{param}-x'], df[f'{param}-y'], df[f'{param}_se-x'], df[f'{param}_se-y'])
     plot_zscores(df, figdir)
 
-    df['dG_bin'] = pd.qcut(df.dG_37_se, 100)
+    df['dG_bin'] = pd.qcut(df.ddG_37_se, 100)
     sigma_df = df[['ddG_37_zscore', 'dG_bin']].groupby('dG_bin').apply(np.std).rename(columns={'ddG_37_zscore':'ddG_37_zscore_std'})
     sigma_df['intra_err'] = [x.mid for x in sigma_df.index.values]
 

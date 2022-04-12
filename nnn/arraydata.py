@@ -61,21 +61,35 @@ class ArrayData(object):
         self.name = name
         self.lib_name = lib_name
         self.replicate_df = replicate_df
-        self.n_rep = len(replicate_df)
+        if len(replicate_df.shape) == 2:
+            self.n_rep = len(replicate_df)
+        else:
+            self.n_rep = 1
+            
 
-        assert np.all(np.isclose(replicate_df['sodium'], replicate_df['sodium'][0])), "Sodium concentration not equal in the replicates"
-        self.buffer = {'sodium': replicate_df['sodium'][0]}
+        if self.n_rep > 1:
+            assert np.all(np.isclose(replicate_df['sodium'], replicate_df['sodium'][0])), "Sodium concentration not equal in the replicates"
+            self.buffer = {'sodium': replicate_df['sodium'][0]}
+        else:
+            self.buffer = {'sodium': replicate_df['sodium']}
         
         self.annotation = fileio.read_annotation(annotation_file, sodium=self.buffer['sodium'])
         if filter_misfold:
             pass
-        self.data_all, self.curve, self.curve_se = self.read_data()
+
+        if self.n_rep > 1:
+            self.data_all, self.curve, self.curve_se = self.read_data()
+        else:
+            self.data_all, self.curve, self.curve_se = self.read_data_single()
+
 
         if error_adjust is not None:
             self.error_adjust = error_adjust
         else:
             if learn_error_adjust_from is None:
-                raise Exception('Need to give `learn_error_adjust_from` if no ErrorAdjust is given!')
+                # OK to have no adjust
+                self.error_adjust = ErrorAdjust()
+                # raise Exception('Need to give `learn_error_adjust_from` if no ErrorAdjust is given!')
             else:
                 self.error_adjust = self.learn_error_adjust_function(learn_error_adjust_from)
 
@@ -103,6 +117,20 @@ class ArrayData(object):
             for rep, rep_name, cond in zip(reps, self.replicate_df['name'], conds)}
         return data, curves, curves_se
 
+    def read_data_single(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        
+        rep = fileio.read_fitted_variant(self.replicate_df.filename, add_chisq_test=False, annotation=None)
+        
+        cond = [x for x in rep.columns if x.endswith('_norm')]
+        if self.replicate_df.drop_last:
+            cond = cond[:-1]
+        if self.replicate_df.reverse:
+            cond = cond[::-1]
+
+        data = processing.combine_replicates([rep], self.replicate_df['name'], verbose=False)
+        curves = {self.replicate_df['name']: rep[cond]}
+        curves_se = {self.replicate_df['name']: rep[[c+'_std' for c in cond]].rename(columns=lambda c: c.replace("_std", "_se")) / np.sqrt(rep['n_clusters']).values.reshape(-1,1)}
+        return data, curves, curves_se
 
 
     def get_replicate_data(self, replicate_name: str, attach_annotation: bool = False, verbose=True) -> pd.DataFrame:

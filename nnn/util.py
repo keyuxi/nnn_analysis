@@ -116,6 +116,11 @@ def add_p_unfolded_NUPACK(df, T_celcius, sodium=1.0):
 
     return df
 
+def get_ddX(df, param='dG_37', by='ConstructType'):
+    class_median = df.groupby(by).apply('median')[param]
+    return df.apply(lambda row: row[param] - class_median[row[by]], axis=1)
+    
+
 def get_symmetric_struct(len_seq, len_loop):
     return '('*int((len_seq - len_loop)/2) + '.'*len_loop + ')'*int((len_seq - len_loop)/2)
 
@@ -208,6 +213,24 @@ def get_seq_structure_dG(seq, structure, celsius, sodium=1.0):
     my_model = nupack.Model(material='DNA', celsius=celsius, sodium=sodium, magnesium=0.0)
     return nupack.structure_energy([seq], structure=structure, model=my_model)
 
+def get_seq_end_pair_prob(seq:str, celsius:float, sodium=1.0, n_pair:int=2) -> float:
+    """
+    Pr[either last or second to last basepair in the hairpin paired]
+    """
+    my_model = nupack.Model(material='DNA', celsius=celsius, sodium=sodium, magnesium=0.0)
+    pair_mat = nupack.pairs([seq], model=my_model).to_array()
+    if n_pair == 1:
+        return pair_mat[0,-1]
+    elif n_pair == 2:
+        try:
+            p1, p2 = pair_mat[0,-1], pair_mat[1,-2]
+        except:
+            p1, p2 = np.nan, np.nan
+
+        return p1 + p2 - p1 * p2
+    else:
+        raise ValueError("n_pair value not allowed")
+
 
 def get_nupack_dH_dS_Tm_dG_37(seq, struct):
     '''Return dH (kcal/mol), dS(kcal/mol), Tm (˚C), dG_37(kcal/mol)'''
@@ -231,9 +254,16 @@ def get_nupack_dH_dS_Tm_dG_37(seq, struct):
     
     return dH, dS, Tm, dG_37
 
+
+
 def is_diff_nupack(df, param):
     return df.apply(lambda row: (row[param+'_lb'] > row[param+'_NUPACK_salt_corrected']) or (row[param+'_ub'] < row[param+'_NUPACK_salt_corrected']), axis=1)
 
+
+# Fluor simulation related
+
+def get_fluor_distance_from_structure(structure: str):
+    return len(structure) - len(structure.strip('.'))
 """
 # Old nupack dH dS Tm code, has problems
 def calc_dH_dS_Tm(seq, package='nupack',dna=True):

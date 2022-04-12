@@ -21,6 +21,7 @@ from collections import defaultdict
 
 # hard-coded loop
 LOOP = 'GAAA'
+complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', '-':'-'}
 
 ##### HELPER FUNCTIONS #####
 def get_rc(seqlist): 
@@ -45,7 +46,6 @@ def get_rc(seqlist):
 
 
 def rcompliment(seq):
-    complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', '-':'-'}
     return "".join(complement.get(base, base) for base in reversed(seq))
 
 def is_WC(pair):
