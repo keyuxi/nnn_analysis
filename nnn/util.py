@@ -141,7 +141,7 @@ def get_target_struct(row):
     series = row['Series']
     construct_type = row['ConstructType']
     seq = row['RefSeq']
-    if series in ['WatsonCrick', 'TETRAloop'] or construct_type in ['BaeControls', 'SuperStem']:
+    if series in ['WatsonCrick', 'TETRAloop'] or construct_type in ['SuperStem']:
         target_struct = get_symmetric_struct(len(seq), 4)
     elif series == 'TRIloop':
         target_struct = get_symmetric_struct(len(seq), 3)
@@ -153,7 +153,7 @@ def get_target_struct(row):
         topScaffold = row['topScaffold']
         stem_pos = seq.find(topScaffold[:len(topScaffold)//2])
         target_struct = '.'*stem_pos + get_symmetric_struct(len(topScaffold) + 4, 4) + '.'*int(len(seq) - stem_pos - len(topScaffold) - 4)
-    elif series == 'MisMatches':
+    elif (series == 'MisMatches') or (construct_type == 'BaeControls'):
         mismatch_list = []
         for x in 'ATCG':
             for y in 'ATCG':
