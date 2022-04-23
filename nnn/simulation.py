@@ -17,7 +17,7 @@ from . import util
 np.random.seed(42)
 
 def distance_2_norm_fluor(x, a=93):
-    norm_fluor = 1 / (1 + (a * x**(-3.0)))
+    norm_fluor = 1.0 / (1.0 + (a * x**(-3.0)))
     # norm_fluor[np.isinf(norm_fluor)] = 0.0
     return norm_fluor
 

@@ -1,4 +1,4 @@
-from re import sub
+
 import numpy as np
 import pandas as pd
 
@@ -9,7 +9,7 @@ np.random.seed(42)
 
 if __name__ == "__main__":
     annotation_file = '/home/groups/wjg/kyx/array_analysis/data/reference/NNNlib2b_annotation_20220418.tsv'
-    subset = True
+    subset = False
     T = np.arange(5, 97.5, 2.5)
     sodium = 0.075
     series_file = '/scratch/groups/wjg/kyx/NNNlib2b_Nov11/data/series_simulated/nupack_75mM.CPseries.pkl'

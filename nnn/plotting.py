@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os, json
 import seaborn as sns
 from scipy.stats import chi2, pearsonr, norm
-from sklearn.metrics import r2_score
+# from sklearn.metrics import r2_score
 from ipynb.draw import draw_struct
 
 from .util import *
@@ -13,8 +13,8 @@ from . import util
 sns.set_style('ticks')
 sns.set_context('paper')
 
-# palette = ['#2f4f4f','#228b22','#00ff00','#000080','#1e90ff','#00ffff','#ff8c00','#deb887','#8b4513','#ff0000','#ff69b4','#800080',]
-palette = cc.glasbey_dark
+palette = ['#2f4f4f','#228b22','#00ff00','#000080','#1e90ff','#00ffff','#ff8c00','#deb887','#8b4513','#ff0000','#ff69b4','#800080',]
+# palette = cc.glasbey_dark
 # palette=[
 #     '#201615',
 #     '#4e4c4f',
@@ -49,8 +49,10 @@ def plot_colored_scatter_comparison(data, x, y,
     df = data.copy()
     df['density'] = calc_kde_pdf(data[[x,y]])
     # df['size'] = 200#100 / data[x]**2
-    sns.scatterplot(data=df, x=x, y=y, hue='density', #size='size',
+    hue_norm = (0 * np.max(df.density), .6 * np.max(df.density))
+    sns.scatterplot(data=df, x=x, y=y, hue='density', size=.1, hue_norm=hue_norm,
                     palette=palette, alpha=alpha, legend=False, ax=ax)
+
 
 def generate_color_palette(index):
     # return sns.dark_palette(sns.color_palette('Set2', 4)[index], reverse=False, as_cmap=True)
@@ -130,9 +132,9 @@ def plot_rep_comparison_by_series(r1, r2, annotation, param, lim,
         if len(series_df) > 100:
             sns.kdeplot(data=series_df, x=param+suffixes[0], y=param+suffixes[1],
                 color=palette[i % len(palette)], ax=ax[i])
-            rsqr = r2_score(series_df[param+suffixes[0]], series_df[param+suffixes[1]])
+            # rsqr = r2_score(series_df[param+suffixes[0]], series_df[param+suffixes[1]])
             pearson, _ = pearsonr(series_df[param+suffixes[0]], series_df[param+suffixes[1]])
-            ax[i].text(lim[0] + 0.1*l, lim[1] - 0.1*l, r'$R^2 = %.3f$'%rsqr, va='bottom')
+            # ax[i].text(lim[0] + 0.1*l, lim[1] - 0.1*l, r'$R^2 = %.3f$'%rsqr, va='bottom')
             ax[i].text(lim[0] + 0.1*l, lim[1] - 0.15*l, r"$Pearson's\ r = %.3f$"%pearson, va='bottom')
         else:
             sns.scatterplot(data=series_df, x=param+suffixes[0], y=param+suffixes[1],
@@ -296,12 +298,15 @@ def plot_actual_and_expected_fit(row, ax, c='k', conds=None):
     T_kelvin=[x+273.15 for x in T_celsius]
     T_inv = np.array([1/x for x in T_kelvin])
     pred_fit = function(row['dH'],row['Tm'], row['fmax'], row['fmin'], T_inv)
+    pred_ub = function(row['dH_lb'], row['Tm_lb'], row['fmax_ub'], row['fmin_ub'], T_inv)
+    pred_lb = function(row['dH_ub'], row['Tm_ub'], row['fmax_lb'], row['fmin_lb'], T_inv)
     
     ax.set_xlim([13,62])
     ax.set_ylim([-0.1,1.4])
 
     ax.errorbar(T_celsius, vals, yerr=errors,fmt='.',c=c)
-    ax.plot(T_celsius, pred_fit, c=c, lw=3)
+    ax.plot(T_celsius, pred_fit, c=c, lw=0.5)
+    ax.fill_between(T_celsius, pred_ub, pred_lb, color=c, alpha=.3)
     ax.set_title('%s, RMSE: %.3f  [%d%d]'% (row.name, row['RMSE'], row['enforce_fmax'], row['enforce_fmin']))
 
 
@@ -411,3 +416,22 @@ def plot_fitting_evaluation(fitted_variant_df_list, legend, save_pdf_file=None):
     
     if save_pdf_file is not None:
         save_multi_image(save_pdf_file)
+        
+def get_pairwise_pearsonr_matrix(df_list, param='dG_37'):
+    """
+    df_list - List[DataFrame] with only the desired col
+    """
+    n = len(df_list)
+    corr_mat = np.eye(n, dtype=float)
+    for i in range(n):
+        df_list[i].columns = [param]
+    
+    for i,df1 in enumerate(df_list):
+        for j in range(i+1, n):
+            df2 = df_list[j]
+            df = df1.join(df2, lsuffix='_x', rsuffix='_y')[[param+'_x', param+'_y']].dropna()
+            pearson, _ = pearsonr(df[param+'_x'], df[param+'_y'])
+            corr_mat[i, j] = pearson
+            corr_mat[j, i] = pearson
+    
+    return corr_mat

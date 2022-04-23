@@ -16,6 +16,58 @@ from . import util, plotting
 sns.set_style('ticks')
 sns.set_context('paper')
 
+#############################
+######### Figure 1 ##########
+#############################
+
+#--------- Raw image ----------#
+
+def get_tile_filename(imagedir, condition, tile):
+    found_filename = [fn for fn in os.listdir(os.path.join(imagedir, condition)) if '_tile%d_'%tile in fn]
+    assert len(found_filename) == 1, print(found_filename)
+    return os.path.join(imagedir, condition, found_filename[0])
+
+def get_cropped_tif(filename, crop_tuple=(1024,1024,256,256)):
+    x0, y0, dx, dy = crop_tuple
+    im = np.array(Image.open(filename))[x0:x0+dx, y0:y0+dy]
+    return im
+
+def normalize_image(img, norm_max_min, celsius):
+    fmax, fmin = norm_max_min.loc[celsius, :]
+    return (img - fmin) / (fmax - fmin)
+
+def plot_fig1_raw_images(figname, normalize=True):
+    datadir = '/scratch/groups/wjg/kyx/NNNlib2b_Nov11/data/'
+    experiment = '20220314'
+    imagedir = os.path.join(datadir, 'images_' + experiment)
+    condition = ['Green10_20', 'Green14_30', 'Green18_40','Green22_50', 'Green26_60']
+    T = [20, 30, 40, 50, 60]
+    tile = 9
+    
+    norm_max_min = pd.read_table(os.path.join(datadir, 'series_normalized', 'NNNlib2b_DNA_%s_norm_max_min.tsv'%experiment))
+    xdata = pd.read_table(os.path.join(datadir, 'series_normalized', 'NNNlib2b_DNA_%s_xdata.txt'%experiment), header=None) - 273.15
+    norm_max_min.index = np.array(xdata).squeeze()
+    
+    fig, ax = plt.subplots(1,5,figsize=(15,3))
+    for i in range(5):
+        im = im = get_cropped_tif(filenames[i], (512, 1024, 256,256))
+        
+        if normalize:
+            norm_im = normalize_image(im, norm_max_min, T[i])
+            ax[i].imshow(norm_im, cmap='gray', vmin=300, vmax=2200)
+        else:
+            ax[i].imshow(im, cmap='gray', vmin=0, vmax=500)
+            
+        ax[i].axis('off')
+        ax[i].set_title('%d °C'%T[i])
+        
+    util.save_fig(figname)
+    
+
+#############################
+######### Figure 2 ##########
+#############################
+
 def plot_fig2_comparison_by_series(vf, param, suffix = '_NUPACK_salt_corrected',
     annotation=None, lim=None):
 

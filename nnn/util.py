@@ -14,12 +14,12 @@ import os, json
 import seaborn as sns
 sns.set_style('ticks')
 sns.set_context('paper')
-import colorcet as cc
+#import colorcet as cc
 from scipy.stats import chi2, pearsonr, norm
-from sklearn.metrics import r2_score
-from lmfit.models import PowerLawModel
+# from sklearn.metrics import r2_score
+# from lmfit.models import PowerLawModel
 from ipynb.draw import draw_struct
-import nupack
+# import nupack
 from matplotlib.backends.backend_pdf import PdfPages
 # from arnie.free_energy import free_energy
 
