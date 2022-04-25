@@ -9,8 +9,8 @@ sns.set_context('paper')
 from ipynb.draw import draw_struct
 import nupack
 from matplotlib.backends.backend_pdf import PdfPages
-from pandarallel import pandarallel
-
+from joblib import Parallel, delayed
+from lmfit import Parameters, minimize
 
 from . import util
 
@@ -18,7 +18,7 @@ np.random.seed(42)
 
 def distance_2_norm_fluor(x, a=93):
     norm_fluor = 1.0 / (1.0 + (a * x**(-3.0)))
-    # norm_fluor[np.isinf(norm_fluor)] = 0.0
+    norm_fluor[np.isinf(norm_fluor)] = 0.0
     return norm_fluor
 
 def get_transform_curve(max_len=40, a=93):
@@ -112,7 +112,7 @@ def plot_nupack_curve(seq, num_sample=1000, sodium=1.0, T=np.arange(20, 62.5, 2.
         ax.set_ylabel('Normalized Fluorescence')
 
 
-def simulate_CPseries(annotation, num_sample=1000, sodium=0.075, T=np.arange(20, 62.5, 2.5)):
+def simulate_CPseries(annotation, num_sample=1000, sodium=0.075, T=np.arange(20, 62.5, 2.5), n_jobs=2):
     """
     Simulates melt curves for the entire library.
     Args:
@@ -120,12 +120,46 @@ def simulate_CPseries(annotation, num_sample=1000, sodium=0.075, T=np.arange(20,
     Returns:
         series_df - (n_seq, n_temp) simulated fluorescence curve (macroscopic mean of the ensemble)
     """
-    pandarallel.initialize()
     n_seq = annotation.shape[0]
     n_temp = len(T)
-    transform_curve = get_transform_curve(max_len=40, a=93.0)
-    series_df = np.zeros((n_seq, n_temp))
+    transform_curve = get_transform_curve(max_len=50, a=93.0)
+    refseqs = annotation.RefSeq
     
-    curves = annotation.RefSeq.parallel_apply(lambda seq: simulate_nupack_curve(seq, num_sample=num_sample, 
-                                     sodium=sodium, T=T, transform_curve=transform_curve))
-    return np.stack(curves.values, axis=0)
+    curves = Parallel(n_jobs=n_jobs)(delayed(simulate_nupack_curve)(seq, num_sample=num_sample, 
+                                     sodium=sodium, T=T, transform_curve=transform_curve) for seq in refseqs)
+    return curves
+    
+    
+#####################
+###### Fitting ######
+#####################
+
+def residual(params, x, data):
+    dH = params['dH']
+    Tm = params['Tm']
+    kB = 0.0019872
+    
+    model = 1 / (1 + np.exp((dH/kB) * (1/(Tm + 273.15) - 1/(x + 273.15))))
+
+    return model - data
+
+def fit_curve(y, T, plot=False, ylim=False):
+    params = Parameters()
+    params.add('dH', value=-40, max=0.0, min=-200.0)
+    params.add('Tm', value=50, max=300, min= -100)
+    out = minimize(residual, params, args=(T, y))
+    
+    dH = out.params['dH'].value
+    Tm = out.params['Tm'].value
+    dG_37 = util.get_dG(dH, Tm, 37.0)
+    chisq = out.chisqr
+    
+    if plot:
+        plt.plot(T, y, 'o')
+        plt.plot(T, residual(out.params, T, y) + y, 'x', label='best fit')
+        if ylim:
+            plt.ylim([-.05, 1.05])
+        plt.legend()
+        plt.show()
+    
+    return np.array([dH, Tm, dG_37, chisq], dtype=float)
