@@ -120,8 +120,8 @@ def simulate_CPseries(annotation, num_sample=1000, sodium=0.075, T=np.arange(20,
     Returns:
         series_df - (n_seq, n_temp) simulated fluorescence curve (macroscopic mean of the ensemble)
     """
-    n_seq = annotation.shape[0]
-    n_temp = len(T)
+    # n_seq = annotation.shape[0]
+    # n_temp = len(T)
     transform_curve = get_transform_curve(max_len=50, a=93.0)
     refseqs = annotation.RefSeq
     
@@ -152,6 +152,7 @@ def fit_curve(y, T, plot=False, ylim=False):
     dH = out.params['dH'].value
     Tm = out.params['Tm'].value
     dG_37 = util.get_dG(dH, Tm, 37.0)
+    rmse = np.sqrt(np.mean((y - out.residual)**2))
     chisq = out.chisqr
     
     if plot:
@@ -162,4 +163,16 @@ def fit_curve(y, T, plot=False, ylim=False):
         plt.legend()
         plt.show()
     
-    return np.array([dH, Tm, dG_37, chisq], dtype=float)
+    return np.array([dH, Tm, dG_37, rmse, chisq], dtype=float)
+    
+    
+def fit_simulated_nupack_series(series_df, n_jobs=1):
+    """
+    Takes the series df from output of simulate_CPseries
+    Returns a df with dH, Tm, dG_37, rmse and chisq
+    """
+    T = series_df.columns
+    result_col = ['dH', 'Tm', 'dG_37', 'rmse', 'chisq']
+    results = Parallel(n_jobs=n_jobs)(delayed(fit_curve)(y, T) for _,y in series_df.iterrows())
+    
+    return pd.DataFrame(data=results, columns=result_col, index=series_df.index)
