@@ -37,9 +37,9 @@ def calc_kde_pdf(data):
 
 
 def plot_colored_scatter_comparison(data, x, y, 
-                                    palette='plasma', alpha=1, ax=None, lim=None):
+                                    palette='plasma', alpha=1, ax=None, lim=None, **kwargs):
     if ax is None:
-        fig, ax = plt.subplots(figsize=(6,6))
+        fig, ax = plt.subplots(figsize=(6,5))
 
     if lim is not None:
         ax.plot(lim, lim, 'k--', zorder=0)
@@ -49,9 +49,16 @@ def plot_colored_scatter_comparison(data, x, y,
     df = data.copy()
     df['density'] = calc_kde_pdf(data[[x,y]])
     # df['size'] = 200#100 / data[x]**2
-    hue_norm = (0 * np.max(df.density), .6 * np.max(df.density))
+    hue_norm = (0 * np.max(df.density), 0.6 * np.max(df.density))
+    
+    norm = plt.Normalize(hue_norm[0], hue_norm[1])
+    sm = plt.cm.ScalarMappable(cmap=palette, norm=norm)
+    sm.set_array([])
     sns.scatterplot(data=df, x=x, y=y, hue='density', size=.1, hue_norm=hue_norm,
-                    palette=palette, alpha=alpha, legend=False, ax=ax)
+                    palette=palette, alpha=alpha, legend=False, ax=ax, rasterized=True, **kwargs)
+    cbar = plt.colorbar(sm)
+    cbar.ax.tick_params(labelsize=5)
+    cbar.set_label('density', size=5)
 
 
 def generate_color_palette(index):

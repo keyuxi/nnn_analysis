@@ -19,7 +19,7 @@ from scipy.stats import chi2, pearsonr, norm
 # from sklearn.metrics import r2_score
 # from lmfit.models import PowerLawModel
 from ipynb.draw import draw_struct
-# import nupack
+import nupack
 from matplotlib.backends.backend_pdf import PdfPages
 # from arnie.free_energy import free_energy
 
@@ -209,8 +209,11 @@ def get_seq_ensemble_dG(seq, celsius, sodium=1.0, verbose=False):
     return dG
 
 
-def get_seq_structure_dG(seq, structure, celsius, sodium=1.0):
-    my_model = nupack.Model(material='DNA', celsius=celsius, sodium=sodium, magnesium=0.0)
+def get_seq_structure_dG(seq, structure, celsius, sodium=1.0, **kwargs):
+    """
+    **kwargs passed to nupack.Model
+    """
+    my_model = nupack.Model(material='DNA', celsius=celsius, sodium=sodium, magnesium=0.0, **kwargs)
     return nupack.structure_energy([seq], structure=structure, model=my_model)
 
 def get_seq_end_pair_prob(seq:str, celsius:float, sodium=1.0, n_pair:int=2) -> float:
