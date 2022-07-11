@@ -6,6 +6,7 @@ Yuxi Ke, Feb 2022
 """
 
 from distutils.log import error
+from pickletools import float8
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -146,8 +147,21 @@ class ArrayData(object):
             annotation = self.annotation
         else:
             annotation = None
-
+            
         return fileio.read_fitted_variant(filename, filter=True, annotation=annotation, sodium=self.buffer['sodium'])
+            
+    def get_replicate_curves(self, replicate_name: str, verbose: bool = True):
+        """
+        Return the normalized values and std of a replicate experiment.
+        """
+        repdata = self.get_replicate_data(replicate_name=replicate_name, verbose=verbose)
+        values = repdata[[c for c in repdata.columns if c.endswith('_norm')]]
+        se = repdata[[c for c in repdata.columns if c.endswith('_norm_std')]] / np.sqrt(repdata['n_clusters'].values.reshape(-1,1))
+        xdata = np.array([c.split('_')[1] for c in repdata.columns if c.endswith('_norm_std')], dtype=float)
+        xdata += 273.15
+        
+        return xdata, values, se
+
 
     def learn_error_adjust_function(self, learn_error_adjust_from, debug=False, figdir='./fig/error_adjust'):
         r1_name, r2_name = learn_error_adjust_from

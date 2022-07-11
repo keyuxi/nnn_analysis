@@ -1,3 +1,4 @@
+from operator import index
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -12,6 +13,9 @@ from sklearn.model_selection import cross_val_score, cross_val_predict, cross_va
 from sklearn.metrics import mean_squared_error
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.linear_model import LinearRegression, Lasso, Ridge
+
+from scipy.stats import pearsonr
+from sklearn.metrics import r2_score
 
 from .util import *
 from . import feature_list
@@ -51,40 +55,74 @@ def get_unknown_yerr_motif_se(X, res):
     return np.sqrt(np.diag(var_coef))
 
 
-def get_motif_se(X, y_err, singular_value_rel_thresh=0):
+def solve_linear_regression(X, y, y_err, singular_value_rel_thresh=1e-15,
+                        verbose=False):
     """
-    X is the feature matrix
-    """
-    A = X / y_err.values.reshape(-1,1)
-    print('Rank of the design matrix A is %d / %d'%(np.linalg.matrix_rank(A), A.shape[1]))
+    Solves linear reggression with measurement error using SVD.
+    With more plotting functions for sanity checks.
+    Args:
+        X is the feature matrix, may have a feature for intercept
+        y - the measured parameters to be 
+        y_err - a vector of the error of the measurements of each datapoint
+    Return:
 
-    _,s,v = np.linalg.svd(A)
+    """
+    A = X / (y_err.reshape(-1,1))
+    b = (y / y_err).reshape(-1,1)
+    if verbose:
+        print('Rank of the design matrix A is %d / %d'%(np.linalg.matrix_rank(A), A.shape[1]))
+        print('Condition number of the design matrix A is %.2f'%np.linalg.cond(A))
+
+    u,s,vh = np.linalg.svd(A, full_matrices=False)
+    if verbose:
+        # plot the singular values
+        _, ax = plt.subplots()
+        ax.plot(s / s[0], 'gx')
+        ax.set_ylim(bottom=0)
+        plt.show()
+        
     s_inv = 1/s
     s_inv[s < s[0]*singular_value_rel_thresh] = 0
-    motif_se = np.sqrt(np.sum((v * s_inv.reshape(1,-1))**2, axis=1))
+    coef_se = np.sqrt(np.sum((vh.T * s_inv.reshape(1,-1))**2, axis=1))
+    # equivalent to np.linalg.pinv(A) @ b
+    # doing this since we've already SVD'ed
+    coef = (vh.T @ np.diag(s_inv) @ u.T @ b).flatten()
+    
+    if verbose:
+        _, ax = plt.subplots(figsize=(10,6))
+        ax.errorbar(np.arange(len(coef)), coef, coef_se, fmt='k.', capsize=3)
+        if isinstance(X, pd.DataFrame):
+            ax.set_xticks(np.arange(len(coef)))
+            ax.set_xticklabels(X.columns, rotation=30)
+        plt.show()
+    
+    return coef, coef_se
+    
+ 
 
-    return motif_se
 
-
-def get_feature_count_matrix(df, feature_method='get_stack_feature_list', stack_size=2):
+def get_feature_count_matrix(df, feature_method='get_stack_feature_list', **kwargs):
         """
         Args:
             df - (n_variant, N) df
+            **kwargs - passed to `feature_method`
         Returns:
             feats - a (n_variant, n_feature) feature df
-            n_feature - int
         """
-        df['feature_list'] = df.apply(lambda row: getattr(feature_list, feature_method)(row, stack_size=stack_size), axis=1)
-        
+        df['feature_list'] = df.apply(lambda row: getattr(feature_list, feature_method)(row, **kwargs), axis=1)
         cv = CountVectorizer()
         feats = pd.DataFrame.sparse.from_spmatrix(cv.fit_transform([' '.join(x) for x in df['feature_list']]),
                         index=df.index, columns=[x.upper() for x in cv.get_feature_names()])
         
-        # Remove features that every construct contains
+        # Remove features that every construct contains and is not intercept
         for k in feats.keys():
-            if len(feats[k].unique())==1:
+            if len(feats[k].unique())==1 and k!='INTERCEPT':
                 feats = feats.drop(columns=[k])
                 
+        if 'INTERCEPT' in feats.columns:
+            intercept = feats.pop('INTERCEPT')
+            feats['intercept'] = intercept
+            
         n_feature = len(feats.keys())
 
         return feats#, n_feature
