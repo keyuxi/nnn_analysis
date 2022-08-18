@@ -128,7 +128,7 @@ def plot_nupack_curve_by_sampling(seq, num_sample=1000, sodium=1.0, T=np.arange(
 def simulate_nupack_fluor(seq, distance_curve, sodium=1.0, celsius=37, 
                              energy_gap=0.5, verbose=False, energy_key='energy', **kwargs):
     """
-    Sample distances at one temperature point.
+    Simulates distances at one temperature point.
     Args:
         energy_gap - float, in kcal/mol
         distance_curve - array

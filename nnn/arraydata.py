@@ -6,9 +6,11 @@ Yuxi Ke, Feb 2022
 """
 
 from distutils.log import error
+from pickletools import float8
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 import os
 from typing import Tuple, Dict
 from . import fileio, processing
@@ -76,12 +78,19 @@ class ArrayData(object):
         self.annotation = fileio.read_annotation(annotation_file, sodium=self.buffer['sodium'])
         if filter_misfold:
             pass
-
+        
+        # load data
         if self.n_rep > 1:
             self.data_all, self.curve, self.curve_se = self.read_data()
         else:
             self.data_all, self.curve, self.curve_se = self.read_data_single()
 
+        # data accounting for num variant per series after each step of processing
+        steps = ['designed', 'fitted', 'passed2state']
+        series = np.unique(self.annotation.Series)
+        self.accounting_df = pd.DataFrame(index=steps, columns=series)
+        self.accounting_df.loc['designed', :] = self.annotation.groupby('Series').apply(len)
+        self.accounting_df.loc['fitted', :] = self.data_all.join(self.annotation).groupby('Series').apply(len)
 
         if error_adjust is not None:
             self.error_adjust = error_adjust
@@ -94,7 +103,6 @@ class ArrayData(object):
                 self.error_adjust = self.learn_error_adjust_function(learn_error_adjust_from)
 
         self.data = self.data_all[[c for c in self.data_all.columns if not ('-' in c)]]
-
 
 
 
@@ -146,10 +154,27 @@ class ArrayData(object):
             annotation = self.annotation
         else:
             annotation = None
-
+            
         return fileio.read_fitted_variant(filename, filter=True, annotation=annotation, sodium=self.buffer['sodium'])
+            
+    def get_replicate_curves(self, replicate_name: str, verbose: bool = True):
+        """
+        Return the normalized values and std of a replicate experiment.
+        """
+        repdata = self.get_replicate_data(replicate_name=replicate_name, verbose=verbose)
+        values = repdata[[c for c in repdata.columns if c.endswith('_norm')]]
+        se = repdata[[c for c in repdata.columns if c.endswith('_norm_std')]] / np.sqrt(repdata['n_clusters'].values.reshape(-1,1))
+        xdata = np.array([c.split('_')[1] for c in repdata.columns if c.endswith('_norm_std')], dtype=float)
+        xdata += 273.15
+        
+        return xdata, values, se
+
 
     def learn_error_adjust_function(self, learn_error_adjust_from, debug=False, figdir='./fig/error_adjust'):
+        """
+        Args:
+            learn_error_adjust_from - Tuple of 2 str, replicate names
+        """
         r1_name, r2_name = learn_error_adjust_from
         r1, r2 = self.get_replicate_data(r1_name), self.get_replicate_data(r2_name)
 
@@ -157,3 +182,99 @@ class ArrayData(object):
         error_adjust.A, error_adjust.k = processing.correct_interexperiment_error(r1, r2, figdir=figdir, return_debug=debug)
 
         return error_adjust
+    
+    def get_two_state_df(self, force_recalculate:bool=False,
+                         myfilter:str="dH_err_rel < 0.2 & Tm_err_abs < 2 & redchi < 1.5 & n_inlier > 10") -> pd.DataFrame:
+        """
+        Load the line fit files for a df with replicate level information
+        """
+        if (not hasattr(self, 'two_state_df')) or force_recalculate:
+            line_fit = []
+            for i in range(self.n_rep):
+                rep = self.get_replicate_data(self.replicate_df.iloc[i]['name'], verbose=False)
+                result_df = pd.read_table(self.replicate_df.iloc[i]['line_fit_filename']).set_index('SEQID')
+                df = rep.join(result_df, lsuffix='_curve', rsuffix='_line')
+                
+                
+                df['Tm_err_abs'] = np.abs(df.Tm_curve - df.Tm_line)
+                df['dH_err_rel'] = - np.abs(df.dH_curve - df.dH_line) / df.dH_line
+                df['n_inlier'] = df['dof_line'] + 2
+                
+                df['two_state'] = df.eval(myfilter)
+                line_fit.append(df)
+                
+            cols = ['dH_line', 'dH_se_line', 'dG_37_line', 'dH_err_rel', 'Tm_err_abs', 'redchi', 'n_inlier', 'two_state']
+            self.two_state_df = pd.concat([d[cols] for d in line_fit], axis=1, keys=self.replicate_df['name'].tolist())
+        
+        return self.two_state_df
+        
+        
+    def filter_two_state(self, min_rep_pass:int=2, force_recalculate:bool=False, overwrite_dH:bool=False,
+                         myfilter:str="dH_err_rel < 0.2 & Tm_err_abs < 2 & redchi < 1.5 & n_inlier > 10",
+                         inplace=False):
+        """
+        Judge final two state behavior based on the replicate level information
+        Args:
+            overwrite_dH - bool, overwrite the curve fitting dH with line fitting dH
+                otherwise use column name 'dH_line'
+            inplace - bool, if True, filter self.data inplace
+                otherwise simply append it to the df
+        """
+    
+        two_state_df = self.get_two_state_df(myfilter=myfilter, force_recalculate=force_recalculate)
+        n_pass = np.nansum(two_state_df.xs('two_state', axis=1, level=1), axis=1)
+        pass_df = pd.DataFrame(data=(n_pass >= min_rep_pass), index=two_state_df.index, columns=['two_state'])
+        
+        self.accounting_df.loc['passed2state', :] = pass_df.query('two_state').join(self.annotation).groupby('Series').apply(len)
+        
+        fig, ax = plt.subplots()
+        sns.histplot(two_state_df[n_pass >= min_rep_pass]['r1','dH_err_rel'].dropna(), 
+                    bins=np.arange(0,1,0.02), alpha=.3,# stat='density',
+                    color='g')
+        sns.histplot(two_state_df[n_pass < min_rep_pass]['r1','dH_err_rel'].dropna(), 
+                    bins=np.arange(0,1,0.02), alpha=.3,# stat='density',
+                    color='r')
+        plt.legend(['pass', 'not pass'])
+
+        plt.title('%.2f%% variants pass the two state filter' % (np.sum(n_pass >= min_rep_pass) / len(n_pass) * 100))
+        plt.show()
+            
+        # use the dH from line fitting for reduced uncertainty
+        dH_line, dH_se_line = processing.get_combined_param(
+                self.two_state_df.xs('dH_line', axis=1, level=1),
+                self.two_state_df.xs('dH_se_line', axis=1, level=1))
+
+        fig, ax = plt.subplots(1, 2, figsize=(6,2))
+        histargs = dict(bins=np.arange(0,10,.2), kde=False, ax=ax[0])
+        sns.histplot(dH_se_line,color='cornflowerblue', label='line fit', **histargs)
+        sns.histplot(self.data['dH_se'], color='c',label='curve fit', **histargs)
+ 
+        histargs = dict(bins=np.arange(-60,0,1), kde=False, ax=ax[1])
+        sns.histplot(dH_line,color='cornflowerblue', label='line fit', **histargs)
+        sns.histplot(self.data['dH'], color='c',label='curve fit', **histargs)
+        plt.legend()
+        plt.show()
+        if overwrite_dH:
+            suffix = ''
+        else:
+            suffix = '_line'
+       
+        if 'two_state' in self.data_all.columns:
+            self.data_all.drop('two_state', axis=1, inplace=True)
+            self.data.drop('two_state', axis=1, inplace=True)
+        
+        dH, dH_se = self.data['dH'], self.data['dH_se']
+        self.data_all = self.data_all.join(pass_df)
+        self.data_all['dH'+suffix], self.data_all['dH_se'+suffix] = dH_line, dH_se_line
+        self.data_all['dH'+suffix] = self.data_all['dH'+suffix].fillna(dH)
+        self.data_all['dH_se'+suffix] = self.data_all['dH_se'+suffix].fillna(dH_se)
+        
+        self.data = self.data.join(pass_df)
+        self.data['dH'+suffix], self.data['dH_se'+suffix] = dH_line, dH_se_line
+        self.data['dH'+suffix] = self.data['dH'+suffix].fillna(dH)
+        self.data['dH_se'+suffix] = self.data['dH_se'+suffix].fillna(dH_se)
+
+        if inplace:
+            self.data = self.data.query('two_state == 1')
+            
+        return pass_df

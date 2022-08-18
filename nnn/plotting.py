@@ -49,7 +49,7 @@ def plot_colored_scatter_comparison(data, x, y,
     df = data.copy()
     df['density'] = calc_kde_pdf(data[[x,y]])
     # df['size'] = 200#100 / data[x]**2
-    hue_norm = (0 * np.max(df.density), 0.6 * np.max(df.density))
+    hue_norm = (0 * np.max(df.density), 1 * np.max(df.density))
     
     norm = plt.Normalize(hue_norm[0], hue_norm[1])
     sm = plt.cm.ScalarMappable(cmap=palette, norm=norm)
@@ -290,6 +290,9 @@ def plot_comparison_by_type(vf, param, suffix = '_NUPACK_salt_corrected',
 
 
 def plot_actual_and_expected_fit(row, ax, c='k', conds=None):
+    """
+    Takes replicate data
+    """
     function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*((Tm+273.15)**-1 - x)))
     if conds is None:
         conds = [x for x in row.keys() if x.endswith('_norm')]
@@ -311,6 +314,8 @@ def plot_actual_and_expected_fit(row, ax, c='k', conds=None):
     ax.set_xlim([13,62])
     ax.set_ylim([-0.1,1.4])
 
+    ax.axhline(row['fmax'], c=c, linestyle='--')
+    ax.axhline(row['fmin'], c=c, linestyle='--')
     ax.errorbar(T_celsius, vals, yerr=errors,fmt='.',c=c)
     ax.plot(T_celsius, pred_fit, c=c, lw=0.5)
     ax.fill_between(T_celsius, pred_ub, pred_lb, color=c, alpha=.3)
@@ -442,3 +447,69 @@ def get_pairwise_pearsonr_matrix(df_list, param='dG_37'):
             corr_mat[j, i] = pearson
     
     return corr_mat
+    
+    
+##### Plotting functions for LinearRegressionSVD #####
+    
+def plot_fitted_coef(linear_regression:LinearRegressionSVD, ax=None, **kwargs):
+
+    coef, coef_se = linear_regression.coef_, linear_regression.coef_se_
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10,6))
+        
+    ax.errorbar(np.arange(len(coef)), coef, coef_se, fmt='k.', capsize=3, **kwargs)
+    ax.set_xticks(np.arange(len(linear_regression.feature_names_in_)))
+    ax.set_xticklabels(linear_regression.feature_names_in_, rotation=30)
+    sns.despine()
+    # plt.show()
+
+    return ax
+    
+def plot_truth_predict(lr:LinearRegressionSVD, 
+                          X_test, y_test, yerr_test,
+                          lim=None, ax=None, title=None,
+                          nupack_prediction=None):
+    """
+    Args:
+        nupack_prediction - array-like. If set, just give `lr`=None,
+            only containing the col to be plotted e.g. dG_37_NUPACK_salt_corrected
+            and the rows in test set
+        title - str, add to the first line
+    """
+    if nupack_prediction is None:
+        pred = lr.predict(X_test)
+        pred_err = lr.predict_err(X_test)
+    else:
+        pred = nupack_prediction
+        pred_err = np.zeros_like(pred)
+    
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(4,4))
+        
+    ax.errorbar(y_test, pred, 
+                xerr=yerr_test, yerr=pred_err, fmt='.', color='k', alpha=.3)
+    if lim is not None:
+        ax.set_xlim(lim)
+        ax.set_ylim(lim)
+        ax.plot(lim, lim, '--', c='gray', zorder=0)
+    else:
+        plt.axis('equal')
+    # plt.gca().set_aspect('equal', adjustable='box')
+    
+    ax.set_xlabel('measurement (kcal/mol)')
+    ax.set_ylabel('prediction (kcal/mol)')
+    corr, _ = pearsonr(y_test, pred)
+    
+    if nupack_prediction is None:
+        title_full = '%d features\n$R^2$ = %.3f, corr = %.3f'% (len(lr.coef_), r2_score(y_test, pred), corr)
+    else:
+        title_full = 'NUPACK\n$R^2$ = %.3f, corr = %.3f'% (r2_score(y_test, pred), corr)
+    
+    if title is not None:
+        title_full = r"$\bf{" + title.replace(' ', '\ ') + '}$\n' + title_full
+    
+    ax.set_title(title_full)
+    
+    sns.despine()
+    return ax
+

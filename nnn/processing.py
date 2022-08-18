@@ -1,18 +1,40 @@
 from typing import Tuple
+from unittest import result
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import seaborn as sns
 from lmfit.models import PowerLawModel
+from sklearn import linear_model
+from uncertainties import ufloat, unumpy
+from uncertainties.umath import *
+import lmfit
 from tqdm import tqdm
 tqdm.pandas()
 
 from .util import *
+from . import motif_fit as mf
 
 sns.set_style('ticks')
 sns.set_context('paper')
 
+# make sure the text is editable in illustrator
+import matplotlib
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
+
+# set font to arial
+matplotlib.rcParams['font.sans-serif'] = "Arial"
+matplotlib.rcParams['font.family'] = "sans-serif"
+
+# some constants
+kB = 0.0019872 # Bolzman constant
+C2T = 273.15 # conversion from celsius to kalvin
+
+###############################
+##### Combine Experiments #####
+###############################
 
 def get_combined_ddX(p1, p2, e1, e2):
     e = np.sqrt(e1**2 + e2**2)
@@ -39,14 +61,19 @@ def get_combined_param(params, errors):
     return p, np.sqrt(e)
 
 
-def combine_replicates(reps, rep_names, verbose=True) -> pd.DataFrame:
+def combine_replicates(reps, rep_names, 
+                       error_type='lb_ub', param=None, verbose=True) -> pd.DataFrame:
     """
     Args:
         reps - iterable, each is a df from one replicate
         rep_names - iterable of str
+        error_type - str, {'lb_ub', 'se'}, indicates how error is represented in `reps`
     """
     def get_cols_2_join(rep, params):
-        return [c for c in rep.columns if any(c.startswith(p) for p in params)] + ['n_clusters']
+        cols = [c for c in rep.columns if any(c.startswith(p) for p in params)]
+        if 'n_clusters' in rep.columns:
+            cols += ['n_clusters']
+        return cols
 
     def get_rep_param_from_df(df, param):
         """
@@ -56,8 +83,10 @@ def combine_replicates(reps, rep_names, verbose=True) -> pd.DataFrame:
         return df[[c for c in df.columns if (('-' in c) and c.split('-')[0] == param)]]
 
 
-    params = ['dH', 'Tm', 'dG_37', 'dS', 'fmax', 'fmin']
+    if param is None:
+        params = ['dH', 'Tm', 'dG_37', 'dS', 'fmax', 'fmin']
     cols = [get_cols_2_join(rep, params) for rep in reps]
+    
     for i, (rep, col, rep_name) in enumerate(zip(reps, cols, rep_names)):
         if i == 0:
             df = rep[col].rename(columns={c: c+'-'+rep_name for c in col})
@@ -80,16 +109,27 @@ def correct_interexperiment_error(r1, r2, plot=True, figdir=None, return_debug=F
         A, k - correction parameters
     """
     def plot_zscores(df, figdir):
-        fig, ax = plt.subplots(1,3,figsize=(18,4))
-        sns.histplot(df['ddH_zscore'], bins=50, color=palette[0], ax=ax[0])
-        sns.histplot(df['dTm_zscore'], bins=50, color=palette[1], ax=ax[1])
-        sns.histplot(df['ddG_37_zscore'], bins=50, color=palette[2], ax=ax[2])
-        ax[0].set_xlim([-10, 10])
-        ax[0].set_title('dH offset: %.2f kcal/mol'%offset['dH'])
-        ax[1].set_xlim([-10, 10])
-        ax[1].set_title('Tm offset: %.2f K'%offset['Tm'])
-        ax[2].set_xlim([-10, 10])
-        ax[2].set_title('dG 37°C offset: %.2f kcal/mol\nzscore std: %.2f'%(offset['dG_37'], np.std(df['ddG_37_zscore'])))
+        l = 7.5
+        cm = 1/2.54
+        bins = np.arange(-l, l, 0.05)
+        fig, ax = plt.subplots(1,3,figsize=(3*4.25*cm,3.5*cm))
+        sns.histplot(df['ddH_zscore'], bins=50, stat='density', color=palette[0], ax=ax[0])
+        sns.histplot(df['dTm_zscore'], bins=50, stat='density', color=palette[1], ax=ax[1])
+        sns.histplot(df['ddG_37_zscore'], bins=50, stat='density', color=palette[2], ax=ax[2])
+        
+        for i in range(3):
+            ax[i].plot(bins, norm.pdf(bins, 0, 1), 'k--')
+        
+        ax[0].set_xlim([-l, l])
+        ax[0].set_title('dH offset: %.2f kcal/mol\nzscore std: %.2f'% (offset['dH'], np.std(df['ddH_zscore'])),
+                        size=6)
+        ax[1].set_xlim([-l, l])
+        ax[1].set_title('Tm offset: %.2f K\nzscore std: %.2f' % (offset['Tm'], np.std(df['dTm_zscore'])),
+                        size=6)
+        ax[2].set_xlim([-l, l])
+        ax[2].set_title('dG 37°C offset: %.2f kcal/mol\nzscore std: %.2f'%(offset['dG_37'], np.std(df['ddG_37_zscore'])),
+                        size=6)
+        sns.despine()
         if figdir is not None:
             save_fig(os.path.join(figdir, 'zscores.pdf'), fig=fig)
         else:

@@ -22,7 +22,9 @@ from ipynb.draw import draw_struct
 import nupack
 from matplotlib.backends.backend_pdf import PdfPages
 # from arnie.free_energy import free_energy
-
+from sklearn.linear_model import LinearRegression
+from scipy.stats import pearsonr
+from sklearn.metrics import r2_score
 
 palette=[
     '#201615',
@@ -70,7 +72,7 @@ def get_GC_content(seq):
     return 100 * np.sum([s in ['G','C'] for s in str(seq)]) / len(str(seq))
 
 
-def get_Na_adjusted_Tm(Tm, dH, GC, Na=0.075, from_Na=1.0):
+def get_Na_adjusted_Tm(Tm, dH, GC, Na=0.083, from_Na=1.0):
     Tmadj = Tm + (-3.22*GC/100 + 6.39)*(np.log(Na/from_Na))
     return Tmadj
 
@@ -115,6 +117,28 @@ def add_p_unfolded_NUPACK(df, T_celcius, sodium=1.0):
     df['p_unfolded_%dC'%T_celcius] = df.apply(get_p_unfolded, axis=1)
 
     return df
+    
+def dotbracket2edgelist(dotbracket_str:str):
+
+    assert dotbracket_str.count('(') == dotbracket_str.count(')'), \
+        'Number of "(" and ")" should match in %s' % dotbracket_str
+
+    # Backbone edges
+    N = len(dotbracket_str)
+    edge_list = [[i, i+1] for i in range(N-1)]
+
+    # Hydrogen bonds
+    flag3p = N - 1
+    for i,x in enumerate(dotbracket_str):
+        if x == '(':
+            for j in range(flag3p, i, -1):
+                if dotbracket_str[j] == ')':
+                    edge_list.append([i, j])
+                    flag3p = j - 1
+                    break
+
+    return edge_list
+    
 
 def get_ddX(df, param='dG_37', by='ConstructType'):
     class_median = df.groupby(by).apply('median')[param]
@@ -263,6 +287,163 @@ def is_diff_nupack(df, param):
     return df.apply(lambda row: (row[param+'_lb'] > row[param+'_NUPACK_salt_corrected']) or (row[param+'_ub'] < row[param+'_NUPACK_salt_corrected']), axis=1)
 
 
+class LinearRegressionSVD(LinearRegression):
+    """
+    The last feature is intercept
+    self.intercept_ is set to 0 to keep consistency
+    y does not have nan ('raise' behavior)
+    """
+    def __init__(self, param='dG_37', **kwargs):
+        super().__init__(fit_intercept=False, **kwargs)
+        self.intercept_ = 0.0
+        self.param = param
+                
+    def fit(self, X:np.array, y:np.array, y_err:np.array, sample_weight=None, 
+            feature_names=None, singular_value_rel_thresh:float=1e-15):
+
+        if sample_weight is not None:
+            assert len(sample_weight) == len(y)
+            y_err = 1 / sample_weight
+            
+        A = X / (y_err.reshape(-1,1))
+        
+        rank_A = np.linalg.matrix_rank(A)
+        n_feature = A.shape[1]
+        if rank_A < n_feature:
+            print('Warning: Rank of matrix A %d is smaller than the number of features %d!' % (rank_A, n_feature))
+            
+        b = (y / y_err).reshape(-1,1)
+        u,s,vh = np.linalg.svd(A, full_matrices=False)
+        s_inv = 1/s
+        s_inv[s < s[0]*singular_value_rel_thresh] = 0
+        self.coef_se_ = np.sqrt(np.sum((vh.T * s_inv.reshape(1,-1))**2, axis=1))
+        self.coef_ = (vh.T @ np.diag(s_inv) @ u.T @ b).flatten()
+        
+        if feature_names is not None:
+            self.feature_names_in_ = np.array(feature_names)
+        
+        self.metrics = self.calc_metrics(X, y, y_err)
+    
+    
+    def calc_metrics(self, X, y, y_err):        
+        """
+        Returns:
+            metrics - Dict[str: float], ['rsqr', 'rmse', 'dof', 'chisq', 'redchi']
+        """
+        y_pred = self.predict(X=X)
+        ss_total = np.nansum((y - y.mean())**2)
+        ss_error = np.nansum((y - y_pred)**2)
+        
+        rsqr = 1 - ss_error / ss_total
+        rmse = np.sqrt(ss_error / len(y))
+        dof = len(y) - len(self.coef_)
+        chisq = np.sum((y - y_pred.reshape(-1,1))**2 / y_err**2)
+        redchi = chisq / dof
+
+        metrics = dict(rsqr=rsqr, rmse=rmse, dof=dof, chisq=chisq, redchi=redchi)
+        
+        return metrics
+    
+    
+    def fit_with_some_coef_fixed(self, X:np.array, y:np.array, y_err:np.array,
+            feature_names, fixed_feature_names, coef_df, coef_se_df=None,# index_col='motif',
+            singular_value_rel_thresh=1e-15, debug=False):
+        """
+        Fix a given list of coef of features and fit the rest. Calls self.fit()
+        Args:
+            feature_names - list like, ALL the feats (column names of X)
+            fixed_feature_names - list like, names of the indices to look up from coef_df
+            coef_df - pd.DataFrame, indices are feature names to look up, only one column with the coef
+            coef_se_df - pd.DataFrame, indices are feature names to look up, only one column with the coef, 
+                optional. If not given, se of the known parameters are presumably set to 0
+        """
+        
+        A = X / (y_err.reshape(-1,1))
+        b = (y / y_err).reshape(-1,1)
+        
+        known_param = [f for f in feature_names if f in fixed_feature_names]
+        known_param_mask = np.array([(f in fixed_feature_names) for f in feature_names], dtype=bool)
+        A_known, A_unknown = A[:, known_param_mask], A[:, ~known_param_mask]
+        if debug:
+            print('known_param_mask: ', np.sum(known_param_mask), known_param)
+            print('A_unknown, A_known: ', A_unknown.shape, A_known.shape)
+        n_feature = A.shape[1]
+        n_feature_to_fit = A_unknown.shape[1]
+        # x_unknown is to be solved; x_known are the known parameters
+        x_known = coef_df.loc[known_param, :].values.flatten()
+        if debug:
+            print('x_known: ', x_known.shape)
+        b_tilde = b - A_known @ x_known.reshape(-1, 1)
+        
+        rank_A1 = np.linalg.matrix_rank(A_unknown)
+        if rank_A1 < n_feature_to_fit:
+            print('Warning: Rank of matrix A_unknown, %d, is smaller than the number of features %d!' % (rank_A1, n_feature_to_fit))
+        
+        # initialize
+        self.coef_ = np.zeros(n_feature)
+        self.coef_se_ = np.zeros(n_feature)
+        
+        u,s,vh = np.linalg.svd(A_unknown, full_matrices=False)
+        s_inv = 1/s
+        s_inv[s < s[0]*singular_value_rel_thresh] = 0
+        x_unknown = (vh.T @ np.diag(s_inv) @ u.T @ b_tilde).flatten()
+        x_se_unknown = np.sqrt(np.sum((vh.T * s_inv.reshape(1,-1))**2, axis=1))
+        
+        self.coef_[known_param_mask] = x_known
+        self.coef_[~known_param_mask] = x_unknown
+        self.coef_se_[~known_param_mask] = x_se_unknown
+        if coef_se_df is not None:
+            self.coef_se_[known_param_mask] = coef_se_df.loc[known_param, :].values.flatten()
+        
+        if feature_names is not None:
+            self.feature_names_in_ = np.array(feature_names)
+        
+        self.metrics = self.calc_metrics(X, y, y_err)
+    
+        
+    def predict_err(self, X):
+        return (X @ self.coef_se_ .reshape(-1,1)).flatten()
+        
+        
+    def fit_intercept_only(self, X, y):
+        self.coef_[-1] = np.mean(y - X[:,:-1] @ self.coef_[:-1].reshape(-1,1))
+        
+        
+    def set_coef(self, feature_names, coef_df, index_col='index'):
+        """
+        Force set coef of the model to that supplied in `coef_df`,
+        sorted in the order of `feature_names`.
+        For instance, external parameter sets like SantaLucia.
+        `coef_se_` is set to 0.
+        Args:
+            feature_names - array-like of str, **WITH** the 'intercept' at the end of feature matrices
+            coef_df - df, with a column named `self.param` e.g. dG_37
+                and a columns called `index_col` to set the names of the coef to.
+            index_col - str. col name to set names of the coef to.
+                if 'index', use index.
+        """
+        if index_col != 'index':
+            coef_df = coef_df.set_index(index_col)
+            
+        self.coef_ = np.append(coef_df.loc[feature_names[:-1],:][self.param].values, 0)
+        self.coef_se_ = np.zeros_like(self.coef_)
+        self.feature_names_in_ = feature_names
+        
+    @property
+    def intercept(self):
+        return self.coef_[-1]
+    @property
+    def intercept_se(self):
+        return self.coef_se_[-1]
+    @property
+    def coef_df(self):
+        return pd.DataFrame(index=self.feature_names_in_,
+                            data=self.coef_.reshape(-1,1), columns=[self.param])
+    @property
+    def coef_se_df(self):
+        return pd.DataFrame(index=self.feature_names_in_,
+                            data=self.coef_se_.reshape(-1,1), columns=[self.param + '_se'])
+        
 # Fluor simulation related
 
 def get_fluor_distance_from_structure(structure: str):
