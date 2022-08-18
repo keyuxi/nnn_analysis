@@ -7,8 +7,8 @@
 #SBATCH --mail-user=kyx@stanford.edu
 #SBATCH --mail-type=FAIL,END,START
 #SBATCH --mem-per-cpu=3G
-#SBATCH --cpus-per-task=12
-#SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=6
+#SBATCH --time=02:00:00
 
 source ~/.bashrc
 conda activate plotting
