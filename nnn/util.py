@@ -72,7 +72,7 @@ def get_GC_content(seq):
     return 100 * np.sum([s in ['G','C'] for s in str(seq)]) / len(str(seq))
 
 
-def get_Na_adjusted_Tm(Tm, dH, GC, Na=0.075, from_Na=1.0):
+def get_Na_adjusted_Tm(Tm, dH, GC, Na=0.083, from_Na=1.0):
     Tmadj = Tm + (-3.22*GC/100 + 6.39)*(np.log(Na/from_Na))
     return Tmadj
 
@@ -117,6 +117,28 @@ def add_p_unfolded_NUPACK(df, T_celcius, sodium=1.0):
     df['p_unfolded_%dC'%T_celcius] = df.apply(get_p_unfolded, axis=1)
 
     return df
+    
+def dotbracket2edgelist(dotbracket_str:str):
+
+    assert dotbracket_str.count('(') == dotbracket_str.count(')'), \
+        'Number of "(" and ")" should match in %s' % dotbracket_str
+
+    # Backbone edges
+    N = len(dotbracket_str)
+    edge_list = [[i, i+1] for i in range(N-1)]
+
+    # Hydrogen bonds
+    flag3p = N - 1
+    for i,x in enumerate(dotbracket_str):
+        if x == '(':
+            for j in range(flag3p, i, -1):
+                if dotbracket_str[j] == ')':
+                    edge_list.append([i, j])
+                    flag3p = j - 1
+                    break
+
+    return edge_list
+    
 
 def get_ddX(df, param='dG_37', by='ConstructType'):
     class_median = df.groupby(by).apply('median')[param]
@@ -324,8 +346,8 @@ class LinearRegressionSVD(LinearRegression):
     
     
     def fit_with_some_coef_fixed(self, X:np.array, y:np.array, y_err:np.array,
-            feature_names, fixed_feature_names, coef_df, coef_se_df=None, index_col='motif',
-            singular_value_rel_thresh=1e-15):
+            feature_names, fixed_feature_names, coef_df, coef_se_df=None,# index_col='motif',
+            singular_value_rel_thresh=1e-15, debug=False):
         """
         Fix a given list of coef of features and fit the rest. Calls self.fit()
         Args:
@@ -335,24 +357,31 @@ class LinearRegressionSVD(LinearRegression):
             coef_se_df - pd.DataFrame, indices are feature names to look up, only one column with the coef, 
                 optional. If not given, se of the known parameters are presumably set to 0
         """
-        # initialize
-        self.coef_ = np.zeros(n_feature)
-        self.coef_se_ = np.zeros(n_feature)
         
         A = X / (y_err.reshape(-1,1))
         b = (y / y_err).reshape(-1,1)
         
+        known_param = [f for f in feature_names if f in fixed_feature_names]
         known_param_mask = np.array([(f in fixed_feature_names) for f in feature_names], dtype=bool)
         A_known, A_unknown = A[:, known_param_mask], A[:, ~known_param_mask]
+        if debug:
+            print('known_param_mask: ', np.sum(known_param_mask), known_param)
+            print('A_unknown, A_known: ', A_unknown.shape, A_known.shape)
         n_feature = A.shape[1]
         n_feature_to_fit = A_unknown.shape[1]
         # x_unknown is to be solved; x_known are the known parameters
-        x_known = coef_df.loc[fixed_feature_names, :].values.flatten()
+        x_known = coef_df.loc[known_param, :].values.flatten()
+        if debug:
+            print('x_known: ', x_known.shape)
         b_tilde = b - A_known @ x_known.reshape(-1, 1)
         
         rank_A1 = np.linalg.matrix_rank(A_unknown)
         if rank_A1 < n_feature_to_fit:
-            print('Warning: Rank of matrix $A_1$ %d is smaller than the number of features %d!' % (rank_A1, n_feature_to_fit))
+            print('Warning: Rank of matrix A_unknown, %d, is smaller than the number of features %d!' % (rank_A1, n_feature_to_fit))
+        
+        # initialize
+        self.coef_ = np.zeros(n_feature)
+        self.coef_se_ = np.zeros(n_feature)
         
         u,s,vh = np.linalg.svd(A_unknown, full_matrices=False)
         s_inv = 1/s
@@ -364,7 +393,7 @@ class LinearRegressionSVD(LinearRegression):
         self.coef_[~known_param_mask] = x_unknown
         self.coef_se_[~known_param_mask] = x_se_unknown
         if coef_se_df is not None:
-            self.coef_se_[known_param_mask] = coef_se_df.loc[fixed_feature_names, :].values.flatten()
+            self.coef_se_[known_param_mask] = coef_se_df.loc[known_param, :].values.flatten()
         
         if feature_names is not None:
             self.feature_names_in_ = np.array(feature_names)
@@ -380,12 +409,12 @@ class LinearRegressionSVD(LinearRegression):
         self.coef_[-1] = np.mean(y - X[:,:-1] @ self.coef_[:-1].reshape(-1,1))
         
         
-    def set_coef(self, feature_names, coef_df, index_col='motif'):
+    def set_coef(self, feature_names, coef_df, index_col='index'):
         """
         Force set coef of the model to that supplied in `coef_df`,
         sorted in the order of `feature_names`.
         For instance, external parameter sets like SantaLucia.
-        `coef_se` is set to 0.
+        `coef_se_` is set to 0.
         Args:
             feature_names - array-like of str, **WITH** the 'intercept' at the end of feature matrices
             coef_df - df, with a column named `self.param` e.g. dG_37
@@ -406,6 +435,14 @@ class LinearRegressionSVD(LinearRegression):
     @property
     def intercept_se(self):
         return self.coef_se_[-1]
+    @property
+    def coef_df(self):
+        return pd.DataFrame(index=self.feature_names_in_,
+                            data=self.coef_.reshape(-1,1), columns=[self.param])
+    @property
+    def coef_se_df(self):
+        return pd.DataFrame(index=self.feature_names_in_,
+                            data=self.coef_se_.reshape(-1,1), columns=[self.param + '_se'])
         
 # Fluor simulation related
 

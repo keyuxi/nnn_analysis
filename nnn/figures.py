@@ -208,3 +208,11 @@ def plot_fig2_nupack_zscore(vf, param='dG_37', suffix='_NUPACK_salt_corrected'):
         ax[i].set_xlabel('$ddG_{37}$ [NUPACK, MANIfold]' + ' (kcal/mol)')
         ax[i].set_title(s)
         ax[i].set_xlim([-l, l])
+
+
+#############################
+######### Figure 3 ##########
+#############################
+
+def plot_triloop_linear_model():
+    pass

@@ -15,7 +15,7 @@ tqdm.pandas()
 
 from .util import *
 from . import motif_fit as mf
-from . import plotting
+from . import plotting, arraydata
 
 sns.set_style('ticks')
 sns.set_context('paper')
@@ -153,6 +153,7 @@ def fit_dG_line(x, y, yerr, inlier_mask, return_ols =True):
 def evaluate_linearity(x, y, yerr, inlier_mask, 
                        fit_figname=None, metric_figname=None,
                        drop_first_last=4, yerr_thresh=.5):
+
     mask = inlier_mask.copy().flatten()
     mask[:drop_first_last], mask[-drop_first_last:] = False, False
     mask[yerr.flatten() > yerr_thresh] = False
@@ -426,3 +427,21 @@ def plot_dG_fit(seqid:str, xdata:np.array, dG:pd.DataFrame, dG_se:pd.DataFrame,
         ax[1].set_xticks(np.arange(3), ['linear', 'quadratic', 'cubic'])
         ax[1].set_title('reduced $\chi^2$')
 
+
+def line_fit_all_replicates(version='v0.0.2'):
+    """
+    A little script to do dG fit on all of the replicates in arraydata
+    Save as tsv files to the fitted_variant folder.
+    """
+    annotation_file = './data/annotation/NNNlib2b_annotation_20220519.tsv'
+    replicate_df = pd.read_table('./data/nnnlib2b_replicates.tsv')
+    arraydata = arraydata.ArrayData(replicate_df=replicate_df.iloc[:4,:],
+                        annotation_file=annotation_file)
+    
+    rep_names = replicate_df['name'].tolist()
+    rep_names.remove('salt')
+    for rep_name in rep_names:
+        print(rep_name)
+        xdata, dG, dG_se, rep = get_rep_dG(arraydata, rep_name)
+        result_df = fit_dG_lines(xdata, dG.sample(), dG_se, dG_se_perc_thresh=90, verbose=False)
+        result_df.to_csv('./data/fitted_variant/dG_fit_%s_%s.tsv' % (replicate_df.set_index('name').loc[rep_name, 'replicate'], version), sep='\t')

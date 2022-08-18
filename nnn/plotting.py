@@ -49,7 +49,7 @@ def plot_colored_scatter_comparison(data, x, y,
     df = data.copy()
     df['density'] = calc_kde_pdf(data[[x,y]])
     # df['size'] = 200#100 / data[x]**2
-    hue_norm = (0 * np.max(df.density), 0.6 * np.max(df.density))
+    hue_norm = (0 * np.max(df.density), 1 * np.max(df.density))
     
     norm = plt.Normalize(hue_norm[0], hue_norm[1])
     sm = plt.cm.ScalarMappable(cmap=palette, norm=norm)
@@ -290,6 +290,9 @@ def plot_comparison_by_type(vf, param, suffix = '_NUPACK_salt_corrected',
 
 
 def plot_actual_and_expected_fit(row, ax, c='k', conds=None):
+    """
+    Takes replicate data
+    """
     function = lambda dH, Tm, fmax, fmin, x: fmin + (fmax - fmin) / (1 + np.exp(dH/0.00198*((Tm+273.15)**-1 - x)))
     if conds is None:
         conds = [x for x in row.keys() if x.endswith('_norm')]
@@ -503,7 +506,7 @@ def plot_truth_predict(lr:LinearRegressionSVD,
         title_full = 'NUPACK\n$R^2$ = %.3f, corr = %.3f'% (r2_score(y_test, pred), corr)
     
     if title is not None:
-        title_full = r"$\bf{" + title + '}$\n' + title_full
+        title_full = r"$\bf{" + title.replace(' ', '\ ') + '}$\n' + title_full
     
     ax.set_title(title_full)
     
