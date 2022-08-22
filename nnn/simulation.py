@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os, json
 import seaborn as sns
-from sklearn import ensemble
+# from sklearn import ensemble
 sns.set_style('ticks')
 sns.set_context('paper')
 from ipynb.draw import draw_struct
@@ -369,13 +369,19 @@ def fit_curve(y, T, plot=False, ylim=False):
     return np.array([dH, Tm, dG_37, rmse, chisq], dtype=float)
     
     
-def fit_simulated_nupack_series(series_df, n_jobs=1):
+def fit_simulated_nupack_series(series_df, n_jobs=1, T_subset_ind=None):
     """
     Takes the series df from output of simulate_CPseries
     Returns a df with dH, Tm, dG_37, rmse and chisq
+    Args:
+        T_subset_ind - array, indeces. only fit using a subset of temperature points
     """
+    
     T = series_df.columns
+    if T_subset_ind is None:
+        T_subset_ind = np.arange(len(T))
+        
     result_col = ['dH', 'Tm', 'dG_37', 'rmse', 'chisq']
-    results = Parallel(n_jobs=n_jobs)(delayed(fit_curve)(y, T) for _,y in series_df.iterrows())
+    results = Parallel(n_jobs=n_jobs)(delayed(fit_curve)(y[T_subset_ind], T[T_subset_ind]) for _,y in series_df.iterrows())
     
     return pd.DataFrame(data=results, columns=result_col, index=series_df.index)
