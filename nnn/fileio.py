@@ -102,3 +102,14 @@ def read_melt_file(melt_file):
     anneal['ramp'] = 'anneal'
     
     return pd.concat((melt, anneal), axis=0)
+    
+    
+def read_ml_data(datadir):
+    """
+    read arr df and train val test split for ML 
+    """
+    arr = pd.read_csv(os.path.join(datadir, 'arr.csv'), index_col=0)
+    with open(os.path.join(datadir, 'train_val_test_split.json'), 'r') as fh:
+        data_split_dict = json.load(fh)
+        
+    return arr, data_split_dict
