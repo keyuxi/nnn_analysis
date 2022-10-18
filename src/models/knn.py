@@ -164,7 +164,9 @@ def get_knn_result(mydata, k:int, args=None):
     y_pred_test = neigh.predict(mydata['test_distance'])
     
     dH_rmse = np.sqrt(np.mean(np.square(mydata['y_test'].iloc[:,0] - y_pred_test[:,0])))
+    dH_mae = np.mean(np.abs(mydata['y_test'].iloc[:,0] - y_pred_test[:,0]))
     Tm_rmse = np.sqrt(np.mean(np.square(mydata['y_test'].iloc[:,1] - y_pred_test[:,1])))
+    Tm_mae = np.mean(np.abs(mydata['y_test'].iloc[:,1] - y_pred_test[:,1]))
     
     print('mode\tk\tsecondary_struct\tcombine_metric\tdH_rmse\tTm_rmse')
     print(f'{args.mode}\t{args.k}\t{args.secondary_struct}\t{args.combine_metric}\t{dH_rmse}\t{Tm_rmse}')
@@ -176,21 +178,21 @@ def get_knn_result(mydata, k:int, args=None):
 
         fig, ax = plt.subplots(1, 2, figsize=(8,4))
         ax[0].scatter(mydata['y_test'].iloc[:,0], y_pred_test[:,0], 
-                      s=70, c='g', alpha=0.05)
+                      s=70, c='c', alpha=0.05)
         ax[0].set_ylim([-60, 0])
         ax[0].set_xlim([-60, 0])
         ax[0].set_xlabel('measured dH')
         ax[0].set_ylabel('k-NN predicted dH')
-        ax[0].set_title('RMSE = %.2f' % dH_rmse)
+        ax[0].set_title('RMSE = %.3f, MAE = %.3f' % (dH_rmse, dH_mae))
         sns.despine()
 
         ax[1].scatter(mydata['y_test'].iloc[:,1], y_pred_test[:,1], 
-                      s=70, c='c', alpha=0.05)
+                      s=70, c='cornflowerblue', alpha=0.05)
         ax[1].set_ylim([20, 60])
         ax[1].set_xlim([20, 60])
         ax[1].set_xlabel('measured Tm')
         ax[1].set_ylabel('k-NN predicted Tm')
-        ax[1].set_title('RMSE = %.2f' % Tm_rmse)
+        ax[1].set_title('RMSE = %.3f, MAE = %.3f' % (Tm_rmse, Tm_mae))
         sns.despine()
         save_fig(os.path.join(args.root, 'knn_out', f'{args.mode}_{args.k}-NN_struct-{args.secondary_struct}_L{args.combine_metric}.pdf'))
 

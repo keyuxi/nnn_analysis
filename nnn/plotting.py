@@ -466,16 +466,19 @@ def plot_fitted_coef(linear_regression:LinearRegressionSVD, ax=None, **kwargs):
     return ax
     
 def plot_truth_predict(lr:LinearRegressionSVD, 
-                          X_test, y_test, yerr_test,
+                          data_dict,
                           lim=None, ax=None, title=None,
-                          nupack_prediction=None):
+                          nupack_prediction=None, **kwargs):
     """
     Args:
+        data_dict - has keys X, y, y_err, param, feature_names
         nupack_prediction - array-like. If set, just give `lr`=None,
             only containing the col to be plotted e.g. dG_37_NUPACK_salt_corrected
             and the rows in test set
         title - str, add to the first line
+        kwargs - passed to ax.errorbar
     """
+    X_test, y_test, yerr_test, param = data_dict['X'], data_dict['y'], data_dict['y_err'], data_dict['param']
     if nupack_prediction is None:
         pred = lr.predict(X_test)
         pred_err = lr.predict_err(X_test)
@@ -486,26 +489,50 @@ def plot_truth_predict(lr:LinearRegressionSVD,
     if ax is None:
         fig, ax = plt.subplots(figsize=(4,4))
         
+    if len(kwargs) == 0:
+        kwargs = dict(color='k', alpha=.3)
+        
+        
     ax.errorbar(y_test, pred, 
-                xerr=yerr_test, yerr=pred_err, fmt='.', color='k', alpha=.3)
-    if lim is not None:
-        ax.set_xlim(lim)
-        ax.set_ylim(lim)
-        ax.plot(lim, lim, '--', c='gray', zorder=0)
-    else:
-        plt.axis('equal')
-    # plt.gca().set_aspect('equal', adjustable='box')
+                xerr=yerr_test, yerr=pred_err, fmt='.', **kwargs)
+
+    if lim is None:
+        if param == 'dG_37':
+            lim = [-3, 1.5]
+        elif param == 'dH':
+            lim = [-60, 0]
+            # lim = [-60, -10]
+        elif param == 'dS':
+            lim = [-.2,0]
+        elif param == 'Tm':
+            lim = [19, 61]
+        # plt.axis('equal')
+    ax.set_xlim(lim)
+    ax.set_ylim(lim)
+    ax.plot(lim, lim, '--', c='gray', zorder=0)
     
-    ax.set_xlabel('measurement (kcal/mol)')
-    ax.set_ylabel('prediction (kcal/mol)')
+    if param == 'Tm':    
+        ax.set_xlabel('measurement (°C)')
+        ax.set_ylabel('prediction (°C)')
+    else:
+        ax.set_xlabel('measurement (kcal/mol)')
+        ax.set_ylabel('prediction (kcal/mol)')
     corr, _ = pearsonr(y_test, pred)
     
+    
     if nupack_prediction is None:
-        title_full = '%d features\n$R^2$ = %.3f, corr = %.3f'% (len(lr.coef_), r2_score(y_test, pred), corr)
+        title_full = ('%d features\n$R^2$ = %.3f, corr = %.3f\nRMSE = %.3f, MAE = %.3f' % 
+            (len(lr.coef_), r2_score(y_test, pred), corr, util.rmse(y_test, pred), util.mae(y_test, pred)))
     else:
-        title_full = 'NUPACK\n$R^2$ = %.3f, corr = %.3f'% (r2_score(y_test, pred), corr)
+        title_full = ('NUPACK\n$R^2$ = %.3f, corr = %.3f\nRMSE = %.3f, MAE = %.3f' % 
+                      (r2_score(y_test, pred), corr, util.rmse(y_test, pred), util.mae(y_test, pred)))
     
     if title is not None:
+        if param == 'dG_37':
+            param_name = 'dG_{37}'
+        else:
+            param_name = param
+        title += ': %s %s' % (param_name, data_dict['split'])
         title_full = r"$\bf{" + title.replace(' ', '\ ') + '}$\n' + title_full
     
     ax.set_title(title_full)
