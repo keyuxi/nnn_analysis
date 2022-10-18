@@ -299,7 +299,7 @@ class LinearRegressionSVD(LinearRegression):
         self.param = param
                 
     def fit(self, X:np.array, y:np.array, y_err:np.array, sample_weight=None, 
-            feature_names=None, singular_value_rel_thresh:float=1e-15):
+            feature_names=None, singular_value_rel_thresh:float=1e-15, skip_rank:bool=False):
 
         if sample_weight is not None:
             assert len(sample_weight) == len(y)
@@ -307,10 +307,11 @@ class LinearRegressionSVD(LinearRegression):
             
         A = X / (y_err.reshape(-1,1))
         
-        rank_A = np.linalg.matrix_rank(A)
-        n_feature = A.shape[1]
-        if rank_A < n_feature:
-            print('Warning: Rank of matrix A %d is smaller than the number of features %d!' % (rank_A, n_feature))
+        if not skip_rank:
+            rank_A = np.linalg.matrix_rank(A)
+            n_feature = A.shape[1]
+            if rank_A < n_feature:
+                print('Warning: Rank of matrix A %d is smaller than the number of features %d!' % (rank_A, n_feature))
             
         b = (y / y_err).reshape(-1,1)
         u,s,vh = np.linalg.svd(A, full_matrices=False)
@@ -476,3 +477,8 @@ def calc_dH_dS_Tm(seq, package='nupack',dna=True):
     
     return dH, dS, Tm, dG_37C
 """
+
+def rmse(y1, y2):
+    return np.sqrt(np.mean(np.square(y1 - y2)))
+def mae(y1, y2):
+    return np.mean(np.abs(y1 - y2))

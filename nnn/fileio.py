@@ -104,12 +104,18 @@ def read_melt_file(melt_file):
     return pd.concat((melt, anneal), axis=0)
     
     
-def read_ml_data(datadir):
+def read_ml_data(datadir, append_2_arr=False):
     """
     read arr df and train val test split for ML 
     """
     arr = pd.read_csv(os.path.join(datadir, 'arr.csv'), index_col=0)
     with open(os.path.join(datadir, 'train_val_test_split.json'), 'r') as fh:
         data_split_dict = json.load(fh)
+        
+    if append_2_arr:
+        arr['data_split'] = ''
+        arr.loc[data_split_dict['train_ind'], 'data_split'] = 'train'
+        arr.loc[data_split_dict['val_ind'], 'data_split'] = 'val'
+        arr.loc[data_split_dict['test_ind'], 'data_split'] = 'test'
         
     return arr, data_split_dict
