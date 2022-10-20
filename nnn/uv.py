@@ -13,17 +13,14 @@ import seaborn as sns
 from lmfit import minimize, Minimizer, Parameters, report_fit
 from scipy.interpolate import interp1d
 from scipy import signal
+from .util import *
 
 import warnings
 warnings.filterwarnings("ignore")
 
-def absolute_file_paths(directory):
-    for dirpath,_,filenames in os.walk(directory):
-        for f in filenames:
-            yield os.path.abspath(os.path.join(dirpath, f))
-
-def get_dG(dH, Tm, celsius):
-    return dH * (1 - (273.15 + celsius) / (273.15 + Tm))
+def lookup_sample_df(df, df_ref, key):
+    # looks up `key` in `df_ref`
+    return df.apply(lambda row: df_ref.query("curve_date == '%s' & curve_num == '%s'" % (row['curve_date'], row['curve_num']))[key].values[0], axis=1)
 
 def read_curve(fn):
     curve = pd.read_csv(fn, header=None)
@@ -45,6 +42,7 @@ def combine_results(out, result):
         result_dict[p+'_fit'] = out.params[p].value
         result_dict[p+'_fit_std'] = out.params[p].stderr
     result_dict.update(result)
+    result_dict['rmse_fit'] = np.sqrt(np.mean(np.square(out.residual)))
     return result_dict
 
 def save_fig(filename, fig=None):
@@ -67,18 +65,21 @@ def save_multi_image(filename):
     pp.close()
 
 ### Directly fit the curves ###
-def residual(pars, x, data):
+def curve_model(x, dH, Tm, fmin, fmax, slope):
     # define the function
+    return fmin + slope * x + ((fmax - fmin)/(1 + np.exp(dH /0.0019872 * ((Tm + 273.15)**(-1) - (x + 273.15)**(-1)))))
+
+def residual(pars, x, data):
     dH, Tm, fmax, fmin, slope = pars['dH'], pars['Tm'], pars['fmax'], pars['fmin'], pars['slope']
-    model = fmin + slope * x + ((fmax - fmin)/(1 + np.exp(dH /0.0019872 * ((Tm + 273.15)**(-1) - (x + 273.15)**(-1)))))
+    model = curve_model(x, dH, Tm, fmin, fmax, slope)
     return model - data
 
-def fit_param_direct(curve, celsius_min=5, celsius_max=95, smooth=True):
+def fit_param_direct(curve, celsius_min=5, celsius_max=95, smooth=True, plot_title=''):
     pfit = Parameters()
     data_max = np.max(curve.absorbance)
     data_min = np.min(curve.absorbance)
     pfit.add(name='dH', value=-20)
-    pfit.add(name='Tm', value=35)
+    pfit.add(name='Tm', value=(celsius_max + celsius_min) * 0.5)
     pfit.add(name='fmax', value=2*data_max, min=data_min, max=20*data_max)
     pfit.add(name='fmin', value=0.2*data_min, min=0, max=data_max)
     pfit.add(name='slope', value = 1e-5, max=5.0, min=-5.0)
@@ -90,7 +91,6 @@ def fit_param_direct(curve, celsius_min=5, celsius_max=95, smooth=True):
     out = minimize(residual, pfit, args=(curve_used.celsius,), 
                    kws={'data': curve_used.absorbance})
     best_fit = curve_used.absorbance + out.residual
-
     #report_fit(out.params)
     
     fig, ax = plt.subplots(figsize=(4,3))
@@ -98,13 +98,14 @@ def fit_param_direct(curve, celsius_min=5, celsius_max=95, smooth=True):
     ax.plot(curve_used.celsius, best_fit, 'orange', linewidth=2.5)
     ax.set_xlabel('temperature (°C)')
     ax.set_ylabel(r'absorbance')
+    ax.set_title(plot_title)
     sns.despine()
     
     return out
 
 
 ### Use the d_absorbance method ###
-def fit_param_d_absorbance(curve, out, celsius_min=5, celsius_max=95, smooth=True):
+def fit_param_d_absorbance(curve, out, celsius_min=5, celsius_max=95, smooth=True, plot_title=''):
 
     curve_used = curve.query(f'celsius >= {celsius_min} & celsius <= {celsius_max}').sort_values(by='celsius')
     x = np.arange(curve_used.celsius.iloc[0], curve_used.celsius.iloc[-1], 0.1)
@@ -125,13 +126,14 @@ def fit_param_d_absorbance(curve, out, celsius_min=5, celsius_max=95, smooth=Tru
     ax.axvline(x=x[peak], ls='--', c='gray')
     ax.set_xlabel('temperature (°C)')
     ax.set_ylabel(r"$p_{unfold}'$")
+    ax.set_title(plot_title)
     sns.despine()
     
     result = {}
-    result['Tm'] = x[peak]
-    result['dH'] = - d_p_unfold[peak] * 4 * 0.0019872 * (result['Tm'] + 273.15)**2
-    result['dS'] = result['dH'] / (result['Tm'] + 273.15)
-    result['dG_37'] = get_dG(result['dH'], result['Tm'], 37)
+    result['Tm_diff'] = x[peak]
+    result['dH_diff'] = - d_p_unfold[peak] * 4 * 0.0019872 * (result['Tm_diff'] + 273.15)**2
+    result['dS_diff'] = result['dH_diff'] / (result['Tm_diff'] + 273.15)
+    result['dG_37_diff'] = get_dG(result['dH_diff'], result['Tm_diff'], 37)
     return result
 
 ### Master Function ###
@@ -140,14 +142,45 @@ def fit_curve(fn, figdir='', **kwargs):
         curve = read_curve(fn)
         curve_name = parse_curve_name(fn)
         print(curve_name['curve_str'])
-        out = fit_param_direct(curve, **kwargs)
+        out = fit_param_direct(curve, plot_title=curve_name['curve_str'], **kwargs)
         save_fig(os.path.join(figdir, curve_name['curve_date'], f"{curve_name['curve_num']}_{curve_name['curve_name']}_direct_fit.png"))
-        result = fit_param_d_absorbance(curve, out, **kwargs)
+        result = fit_param_d_absorbance(curve, out, plot_title=curve_name['curve_str'], **kwargs)
         save_fig(os.path.join(figdir, curve_name['curve_date'], f"{curve_name['curve_num']}_{curve_name['curve_name']}_d_p_unfold.png"))
         result_dict = combine_results(out, result)
         result_dict.update(kwargs)
         result_dict.update(curve_name)
+        print('\tDone!')
         return result_dict
     except:
         print("Trouble with", fn)
         return dict()
+    
+    
+### Main ###
+def fit_all():
+    datadir = '/mnt/d/data/nnn/ECLExport'
+    data_list = [fn for fn in absolute_file_paths(datadir) if fn.endswith('.csv')]
+    sample_df = pd.read_csv('/mnt/d/data/nnn/UVMeltingSampleSheet.csv', index_col=0)
+    
+    result_columns = ['curve_date', 'curve_num', 'curve_name',
+                  'dH_fit', 'dH_fit_std', 'Tm_fit', 'Tm_fit_std', 
+                  'fmax_fit', 'fmax_fit_std', 'fmin_fit', 'fmin_fit_std', 
+                  'slope_fit', 'slope_fit_std', 'rmse_fit',
+                  'Tm', 'dH', 'dS', 'dG_37', 
+                  'celsius_min', 'celsius_max']
+
+    result_df = pd.DataFrame(index=[parse_curve_name(x)['curve_str'] for x in data_list], columns=result_columns)
+
+    for fn in data_list:
+        curve_name = parse_curve_name(fn)
+        row = sample_df.query("curve_date == '%s' & curve_num == '%s'" % (curve_name['curve_date'], curve_name['curve_num']))
+        
+        if row.shape[0] == 0:
+            print('Cannot find %s in the sample sheet' % curve_name['curve_str'])
+        else:
+            result_dict = fit_curve(fn, figdir='/mnt/d/data/nnn/fig', 
+                                    celsius_min=row.at[row.index[0],'celsius_min'],
+                                    celsius_max=row.at[row.index[0],'celsius_max'])
+
+            result_df.loc[curve_name['curve_str'], :] = result_dict
+    result_df.to_csv('/mnt/d/data/nnn/uvmelt.csv')

@@ -55,7 +55,12 @@ def save_multi_image(filename):
         fig.savefig(pp, format='pdf')
     pp.close()
 
-
+def absolute_file_paths(directory):
+    for dirpath,_,filenames in os.walk(directory):
+        for f in filenames:
+            yield os.path.abspath(os.path.join(dirpath, f))
+            
+            
 def convert_santalucia_motif_representation(motif):
     strand = motif.split('_')
     return(f'{strand[0]}_{strand[1][::-1]}')
