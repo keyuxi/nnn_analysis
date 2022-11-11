@@ -52,7 +52,7 @@ def get_combined_param(params, errors):
     Returns:
         parameter and error - (n_variant, 2) array, of the combined dataset
     """
-    params, errors = np.array(params), np.array(errors)
+    params, errors = np.atleast_2d(np.array(params)), np.atleast_2d(np.array(errors))
 
     assert params.shape == errors.shape, f"Shapes don't match between params {params.shape} and errors {errors.shape}"
 

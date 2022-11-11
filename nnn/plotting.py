@@ -498,7 +498,8 @@ def plot_truth_predict(lr:LinearRegressionSVD,
 
     if lim is None:
         if param == 'dG_37':
-            lim = [-3, 1.5]
+            #lim = [-3, 1.5]
+            lim = [-4.5, 0]
         elif param == 'dH':
             lim = [-60, 0]
             # lim = [-60, -10]
@@ -529,7 +530,7 @@ def plot_truth_predict(lr:LinearRegressionSVD,
     
     if title is not None:
         if param == 'dG_37':
-            param_name = 'dG_{37}'
+            param_name = 'dG°_{37}'
         else:
             param_name = param
         title += ': %s %s' % (param_name, data_dict['split'])

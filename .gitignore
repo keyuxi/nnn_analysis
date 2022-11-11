@@ -8,6 +8,7 @@ nnn_fitting/
 
 # testing
 fmax_fmin.sh
+envs/ub
 
 # temporary stuffs 
 __*__/

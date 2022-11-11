@@ -18,6 +18,7 @@ from scipy.stats import pearsonr
 from sklearn.metrics import r2_score
 
 from .util import *
+from . import plotting
 from . import feature_list
 
 
@@ -241,3 +242,52 @@ def compare_fit_with_santalucia(df, santa_lucia, params=['dH', 'dS', 'dG_37']):
         santa_lucia = santa_lucia.merge(fit_param, on='motif', how='inner', suffixes=('_SantaLucia', '_MANIfold'))
 
     return santa_lucia
+    
+def get_X_y(arr, split_dict, param, feats=None, split='train'):
+    """
+    Returns:
+        feats - DataFrame, needs .values when fed into LinearRegressionSVD
+    """
+    assert split_dict is not None
+    seqids = split_dict[split+'_ind']
+    if feats is not None:
+        X = feats.loc[seqids, :].values
+    else:    
+        feats = mf.get_feature_count_matrix(arr, feature_method='get_feature_list', 
+                                            fit_intercept=False, symmetry=False)
+        X = feats.values
+    df = arr.loc[seqids, :]
+    y = df[param].values
+    y_err = df[param+'_se'].values
+    
+    return dict(X=X, y=y, y_err=y_err, feature_names=feats.columns.tolist(), param=param, split=split)
+    
+    
+def fit_param(arr, data_split_dict, param, feats, ax, mode='val'):
+    color_dict = dict(dH='c', Tm='cornflowerblue', dG_37='teal', dS='steelblue')
+    train_data = get_X_y(arr, data_split_dict, param=param, feats=feats, split='train')
+    val_data = get_X_y(arr, data_split_dict, param=param, feats=feats, split=mode)
+    
+    lr = LinearRegressionSVD()
+    lr.fit(train_data['X'], train_data['y'], train_data['y_err'], feature_names=train_data['feature_names'],
+           skip_rank=False)
+    
+    plotting.plot_truth_predict(lr, val_data, ax=ax, title='NNN OLS model',
+                            color=color_dict[param], alpha=.05)
+    
+    return lr
+    
+    
+def pred_variant(q_row, lr, verbose=False):
+    """
+    Predict a single variant given a linear regression model
+    """
+    q_feat_list = feature_list.get_feature_list(q_row, fit_intercept=False, symmetry=False, sep_base_stack=True)
+
+    pred = lr.coef_df.loc[q_feat_list].sum().values[0]
+    gt = q_row[lr.param]
+    
+    if verbose:
+        print("%.4f\t%.4f" % (pred, gt))
+    
+    return dict(pred=pred, gt=gt)

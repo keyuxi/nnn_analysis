@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import os, json
+import pickle
 
 from . import util
 
@@ -119,3 +120,8 @@ def read_ml_data(datadir, append_2_arr=False):
         arr.loc[data_split_dict['test_ind'], 'data_split'] = 'test'
         
     return arr, data_split_dict
+    
+def read_pickle(fn):
+    with open(fn, 'rb') as fh:
+        pickle_dict = pickle.load(fh)
+    return pickle_dict

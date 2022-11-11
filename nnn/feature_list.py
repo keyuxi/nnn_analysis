@@ -204,3 +204,21 @@ def get_feature_list(row, stack_size:int=2, sep_base_stack:bool=False,
         return loops_cleaned + stacks_cleaned + ['intercept']
     else:
         return loops_cleaned + stacks_cleaned
+        
+def get_stem_nn_feature_list(row):
+    dup_row = util.get_duplex_row(row)
+    seq = dup_row.RefSeq
+    # struct = dup_row.TargetStruct
+    stem_len = int((len(seq) - 4.0) / 2.0)
+    seq_pad = f'x{seq[:stem_len]}y+x{seq[-stem_len:]}y'
+    nn_list = []
+    for flag in range(stem_len + 1):
+        if flag == 0:
+            nn = seq_pad[:2] + '+' + seq_pad[-2:] + '_((+))'
+        elif flag == stem_len:
+            nn = seq_pad[-flag-2:-flag] + '+' + seq_pad[flag:flag+2] + '_((+))'
+        else:
+            nn = seq_pad[flag:flag+2] + '+' + seq_pad[-flag-2:-flag] + '_((+))'
+        nn_list.append(nn)
+        
+    return nn_list

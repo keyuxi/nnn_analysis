@@ -35,6 +35,8 @@ palette=[
     '#537692',
     '#a3acb1']#cc.glasbey_dark
 
+complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', '-':'-'}
+
 
 def save_fig(filename, fig=None):
 
@@ -60,6 +62,9 @@ def absolute_file_paths(directory):
         for f in filenames:
             yield os.path.abspath(os.path.join(dirpath, f))
             
+
+def rcompliment(seq):
+    return "".join(complement.get(base, base) for base in reversed(seq))
             
 def convert_santalucia_motif_representation(motif):
     strand = motif.split('_')
@@ -77,12 +82,42 @@ def get_GC_content(seq):
     return 100 * np.sum([s in ['G','C'] for s in str(seq)]) / len(str(seq))
 
 
-def get_Na_adjusted_Tm(Tm, dH, GC, Na=0.083, from_Na=1.0):
-    Tmadj = Tm + (-3.22*GC/100 + 6.39)*(np.log(Na/from_Na))
+def get_Na_adjusted_Tm(Tm, dH, GC, Na=0.088, from_Na=1.0):
+    # Tmadj = Tm + (-3.22*GC/100 + 6.39)*(np.log(Na/from_Na))
+    Tmadj_inv = (1 / (Tm + 273.15) + (4.29 * GC/100 - 3.95) * 1e-5 * np.log(Na / from_Na)
+        + 9.4 * 1e-6 * (np.log(Na)**2 - np.log(from_Na)**2))
+    Tmadj = 1 / Tmadj_inv - 273.15
+    
     return Tmadj
 
 def get_dG(dH, Tm, celsius):
     return dH * (1 - (273.15 + celsius) / (273.15 + Tm))
+    
+def get_dS(dH, Tm):
+    return dH / (Tm + 273.15)
+    
+def get_dG_err(dH, dH_err, Tm, Tm_err, celsius):
+    """
+    Error propagation
+    dG = dH - TdS
+    dG_err = sqrt(dH_err^2 + (TdS)_err^2)
+           = sqrt(dH_err^2 + (T*dS_err)^2)
+    """
+    dS_err = get_dS_err(dH, dH_err, Tm, Tm_err)
+    return np.sqrt(dH_err**2 + ((celsius + 273.15) * dS_err)**2)
+    
+def get_dS_err(dH, dH_err, Tm, Tm_err):
+    """
+    Error propagation
+    dS = dH / Tm
+    dS_err = - dS * sqrt((dH_err / dH)^2 + (Tm_err / Tm)^2)
+    """
+    dS = get_dS(dH, Tm)
+    return  - dS * np.sqrt((dH_err / dH)**2 + (Tm_err / (Tm + 273.15))**2)
+    
+def get_Na_adjusted_dG_37(Tm, dH, GC, Na=0.088, from_Na=1.0):
+    Tm_adjusted = get_Na_adjusted_Tm(Tm, dH, GC, Na, from_Na)
+    return get_dG(dH, Tm_adjusted, 37)
     
 def get_dof(row):
     n_T = len(np.arange(20, 62.5, 2.5))
@@ -216,8 +251,8 @@ def get_curve_pred(row, conds=None):
     return pred_fit, vals, errors
 
 
-def get_mfe_struct(seq, return_free_energy=False, verbose=False, celsius=0.0, sodium=1.0):
-    my_model = nupack.Model(material='DNA', celsius=celsius, sodium=sodium, magnesium=0.0)
+def get_mfe_struct(seq, return_free_energy=False, verbose=False, celsius=0.0, sodium=1.0, param_set='dna04'):
+    my_model = nupack.Model(material=param_set, celsius=celsius, sodium=sodium, magnesium=0.0)
     mfe_structures = nupack.mfe(strands=[seq], model=my_model)
     mfe_struct = str(mfe_structures[0].structure)
 
@@ -232,24 +267,27 @@ def get_mfe_struct(seq, return_free_energy=False, verbose=False, celsius=0.0, so
         return mfe_struct
 
 
-def get_seq_ensemble_dG(seq, celsius, sodium=1.0, verbose=False):
-    my_model = nupack.Model(material='DNA', celsius=celsius, sodium=sodium, magnesium=0.0)
+def get_seq_ensemble_dG(seq, celsius, sodium=1.0, verbose=False, param_set='dna04'):
+    my_model = nupack.Model(material=param_set, celsius=celsius, sodium=sodium, magnesium=0.0)
     _, dG = nupack.pfunc(seq, model=my_model)
     return dG
 
 
-def get_seq_structure_dG(seq, structure, celsius, sodium=1.0, **kwargs):
+def get_seq_structure_dG(seq, structure, celsius, sodium=1.0, param_set='dna04', **kwargs):
     """
     **kwargs passed to nupack.Model
     """
-    my_model = nupack.Model(material='DNA', celsius=celsius, sodium=sodium, magnesium=0.0, **kwargs)
-    return nupack.structure_energy([seq], structure=structure, model=my_model)
+    my_model = nupack.Model(material=param_set, celsius=celsius, sodium=sodium, magnesium=0.0, **kwargs)
+    if isinstance(seq, str):
+        return nupack.structure_energy([seq], structure=structure, model=my_model)
+    else:
+        return nupack.structure_energy(seq, structure=structure, model=my_model)
 
-def get_seq_end_pair_prob(seq:str, celsius:float, sodium=1.0, n_pair:int=2) -> float:
+def get_seq_end_pair_prob(seq:str, celsius:float, sodium=1.0, n_pair:int=2, param_set='dna04') -> float:
     """
     Pr[either last or second to last basepair in the hairpin paired]
     """
-    my_model = nupack.Model(material='DNA', celsius=celsius, sodium=sodium, magnesium=0.0)
+    my_model = nupack.Model(material=param_set, celsius=celsius, sodium=sodium, magnesium=0.0)
     pair_mat = nupack.pairs([seq], model=my_model).to_array()
     if n_pair == 1:
         return pair_mat[0,-1]
@@ -264,15 +302,15 @@ def get_seq_end_pair_prob(seq:str, celsius:float, sodium=1.0, n_pair:int=2) -> f
         raise ValueError("n_pair value not allowed")
 
 
-def get_nupack_dH_dS_Tm_dG_37(seq, struct):
+def get_nupack_dH_dS_Tm_dG_37(seq, struct, **kwargs):
     '''Return dH (kcal/mol), dS(kcal/mol), Tm (˚C), dG_37(kcal/mol)'''
     T1=0
     T2=50
 
-    dG_37 = get_seq_structure_dG(seq, struct, 37)
+    dG_37 = get_seq_structure_dG(seq, struct, 37, **kwargs)
 
-    dG_1 = get_seq_structure_dG(seq, struct, T1)
-    dG_2 = get_seq_structure_dG(seq, struct, T2)
+    dG_1 = get_seq_structure_dG(seq, struct, T1, **kwargs)
+    dG_2 = get_seq_structure_dG(seq, struct, T2, **kwargs)
 
     dS = -1*(dG_2 - dG_1)/(T2 - T1)
     assert((dG_1 + dS*(T1+273.15)) - (dG_2 + dS*(T2+273.15)) < 1e-6)
@@ -291,6 +329,12 @@ def get_nupack_dH_dS_Tm_dG_37(seq, struct):
 def is_diff_nupack(df, param):
     return df.apply(lambda row: (row[param+'_lb'] > row[param+'_NUPACK_salt_corrected']) or (row[param+'_ub'] < row[param+'_NUPACK_salt_corrected']), axis=1)
 
+def add_intercept(arr):
+    """
+    Helper function for fitting with LinearRegressionSVD
+    """
+    arr_colvec = arr.reshape(-1, 1)
+    return np.concatenate((arr_colvec, np.ones_like(arr_colvec)), axis=1)
 
 class LinearRegressionSVD(LinearRegression):
     """
@@ -454,6 +498,17 @@ class LinearRegressionSVD(LinearRegression):
 
 def get_fluor_distance_from_structure(structure: str):
     return len(structure) - len(structure.strip('.'))
+    
+    
+def get_duplex_row(hairpin_row):
+    """
+    Assume loop size is 4
+    """
+    row = hairpin_row.copy()
+    stem_len = int((len(row.RefSeq) - 4.0) / 2.0)
+    row.TargetStruct = row.TargetStruct.replace('....','+')
+    row.RefSeq = row.RefSeq[:stem_len] + '+' + row.RefSeq[-stem_len:]
+    return row
 """
 # Old nupack dH dS Tm code, has problems
 def calc_dH_dS_Tm(seq, package='nupack',dna=True):
