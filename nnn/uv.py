@@ -285,12 +285,13 @@ def fit_all(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv'):
     return result_df
     
 ###### Aggregate the results in each sample #####
-def agg_fit_result(uvmelt_result_file, agg_result_file):
+def agg_fit_result(uvmelt_result_file, agg_result_file, sample_sheet_file,
+                   Tm_std_thresh=0.5, dH_std_thresh=1.5, clean=True):
     uv = lambda x: processing.get_combined_param(x, result_df.loc[x.index, x.name+'_std'])[0]
     uv_std = lambda x: processing.get_combined_param(x, result_df.loc[x.index, x.name+'_std'])[1]
     
     result_df = pd.read_csv(uvmelt_result_file, index_col=0).query('pass_qc')
-    agg_stat = [ uv, uv_std]
+    agg_stat = [uv, uv_std]
     result_agg_df = result_df.groupby(['SEQID', 'curve_date', 'curve_num']).agg(dict(dH=agg_stat, Tm=agg_stat)).reset_index()
 
     result_agg_df.columns = [f'{x[0]}_{x[1]}'.strip('_').replace('<lambda_0>', 'uv').replace('<lambda_1>', 'uv_std') for x in result_agg_df.columns]
@@ -307,6 +308,28 @@ def agg_fit_result(uvmelt_result_file, agg_result_file):
     
     result_agg_df['is_hairpin'] = result_agg_df.SEQID.apply(lambda x: False if ('_' in x) else True)
     result_agg_df['SEQID'] = result_agg_df.SEQID.apply(lambda x: x.split('_')[0] if '_' in x else x)
+    
+    sample_sheet = read_sample_sheet(sample_sheet_file)
+    for col in ['Na_mM', 'conc_uM', 'purification']:
+        result_agg_df[col] = lookup_sample_df(result_agg_df, sample_sheet, col)
+        
+    qc_criterion = 'Tm_uv_std < %f & dH_uv_std < %f' % (Tm_std_thresh, dH_std_thresh)
+    fig, ax = plt.subplots(figsize=(4,4))
+    sns.scatterplot(data=result_agg_df,
+                    x='dH_uv_std', y='Tm_uv_std', hue='curve_date',
+                    palette='tab20', ax=ax)
+    ax.axhline(Tm_std_thresh, linestyle='--', c='gray')
+    ax.axvline(dH_std_thresh, linestyle='--', c='gray')
+    ax.set_title('%.2f%% (%d / %d) variants passed QC' % 
+                 (100 * result_agg_df.eval(qc_criterion).sum() / len(result_agg_df), result_agg_df.eval(qc_criterion).sum(), len(result_agg_df)))
+    sns.despine()
+    save_fig(agg_result_file.replace('.csv', '.pdf'), fig)
+    
+    if clean:
+        result_agg_df = result_agg_df.query(qc_criterion)
+    else:
+        result_agg_df['pass_qc'] = result_agg_df.eval(qc_criterion)
+        
     result_agg_df.to_csv(agg_result_file)
     
     return result_agg_df
@@ -321,7 +344,7 @@ def prep_x_y_yerr(df, param, adjusted=True):
         
     x = df[param+x_suffix].values.reshape(-1,1)
     y = df[param+'_uv'].values.reshape(-1,1)
-    yerr = df[param+'_std'].values.reshape(-1,1)
+    yerr = df[param+'_uv_std'].values.reshape(-1,1)
     yerr[yerr==0] = np.median(yerr)
     return add_intercept(x), y, yerr
 

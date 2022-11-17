@@ -125,3 +125,7 @@ def read_pickle(fn):
     with open(fn, 'rb') as fh:
         pickle_dict = pickle.load(fh)
     return pickle_dict
+    
+def write_pickle(object, fn):
+    with open(fn, 'wb') as fh:
+        pickle.dump(object, fh)

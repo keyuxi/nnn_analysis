@@ -115,6 +115,10 @@ def get_dS_err(dH, dH_err, Tm, Tm_err):
     dS = get_dS(dH, Tm)
     return  - dS * np.sqrt((dH_err / dH)**2 + (Tm_err / (Tm + 273.15))**2)
     
+def get_Na_adjusted_dG(Tm, dH, GC, celsius, Na=0.088, from_Na=1.0):
+    Tm_adjusted = get_Na_adjusted_Tm(Tm, dH, GC, Na, from_Na)
+    return get_dG(dH, Tm_adjusted, celsius)
+    
 def get_Na_adjusted_dG_37(Tm, dH, GC, Na=0.088, from_Na=1.0):
     Tm_adjusted = get_Na_adjusted_Tm(Tm, dH, GC, Na, from_Na)
     return get_dG(dH, Tm_adjusted, 37)
@@ -283,6 +287,7 @@ def get_seq_structure_dG(seq, structure, celsius, sodium=1.0, param_set='dna04',
     else:
         return nupack.structure_energy(seq, structure=structure, model=my_model)
 
+
 def get_seq_end_pair_prob(seq:str, celsius:float, sodium=1.0, n_pair:int=2, param_set='dna04') -> float:
     """
     Pr[either last or second to last basepair in the hairpin paired]
@@ -302,8 +307,11 @@ def get_seq_end_pair_prob(seq:str, celsius:float, sodium=1.0, n_pair:int=2, para
         raise ValueError("n_pair value not allowed")
 
 
-def get_nupack_dH_dS_Tm_dG_37(seq, struct, **kwargs):
-    '''Return dH (kcal/mol), dS(kcal/mol), Tm (˚C), dG_37(kcal/mol)'''
+def get_nupack_dH_dS_Tm_dG_37(seq, struct, sodium=1.0, **kwargs):
+    '''
+    Return dH (kcal/mol), dS(kcal/mol), Tm (˚C), dG_37(kcal/mol)
+    Use the better sodium correction equation
+    '''
     T1=0
     T2=50
 
@@ -319,6 +327,10 @@ def get_nupack_dH_dS_Tm_dG_37(seq, struct, **kwargs):
     
     if dS != 0:
         Tm = (dH/dS) - 273.15 # to convert to ˚C
+        Tm = get_Na_adjusted_Tm(Tm=Tm, dH=dH, GC=get_GC_content(seq), 
+                                    Na=sodium, from_Na=1.0)
+        dG_37 = get_dG(Tm=Tm, dH=dH, celsius=37)
+        dS = dH / (Tm + 273.15)
     else:
         Tm = np.nan
     

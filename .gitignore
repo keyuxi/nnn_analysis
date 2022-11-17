@@ -5,6 +5,7 @@ NNNlib2b-analysis/
 fig/
 out/
 nnn_fitting/
+tmp/
 
 # testing
 fmax_fmin.sh
