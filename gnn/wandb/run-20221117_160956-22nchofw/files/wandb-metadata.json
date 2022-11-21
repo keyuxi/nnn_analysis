@@ -1,0 +1,168 @@
+{
+    "os": "Linux-5.10.102.1-microsoft-standard-WSL2-x86_64-with-glibc2.31",
+    "python": "3.9.13",
+    "heartbeatAt": "2022-11-18T00:09:57.306962",
+    "startedAt": "2022-11-18T00:09:56.982142",
+    "docker": null,
+    "cuda": null,
+    "args": null,
+    "state": "running",
+    "program": "gnn/221117_jizhou_computer_gnn_setup.ipynb",
+    "root": "/home/kyx/nnn_analysis",
+    "git": {
+        "remote": "https://github.com/keyuxi/nnn_analysis.git",
+        "commit": "3c2de902beab02ae2b6f23f38485027779c1cec7"
+    },
+    "email": "keyuxi@yeah.net",
+    "host": "DESKTOP-GNCAK2V",
+    "username": "kyx",
+    "executable": "/home/kyx/miniconda3/envs/torch/bin/python",
+    "cpu_count": 12,
+    "cpu_count_logical": 24,
+    "cpu_freq": {
+        "current": 2903.998999999998,
+        "min": 0.0,
+        "max": 0.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2903.999,
+            "min": 0.0,
+            "max": 0.0
+        }
+    ],
+    "disk": {
+        "total": 250.98248672485352,
+        "used": 15.80526351928711
+    },
+    "gpu": "NVIDIA TITAN V",
+    "gpu_count": 2,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA TITAN V",
+            "memory_total": 12884901888
+        },
+        {
+            "name": "NVIDIA TITAN Xp",
+            "memory_total": 12884901888
+        }
+    ],
+    "memory": {
+        "total": 100.35192108154297
+    }
+}

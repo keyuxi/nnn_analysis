@@ -1,0 +1,52 @@
+2022-11-17 16:11:21,460 INFO    MainThread:3837 [wandb_setup.py:_flush():68] Configure stats pid to 3837
+2022-11-17 16:11:21,460 INFO    MainThread:3837 [wandb_setup.py:_flush():68] Loading settings from /home/kyx/.config/wandb/settings
+2022-11-17 16:11:21,460 INFO    MainThread:3837 [wandb_setup.py:_flush():68] Loading settings from /home/kyx/nnn_analysis/gnn/wandb/settings
+2022-11-17 16:11:21,460 INFO    MainThread:3837 [wandb_setup.py:_flush():68] Loading settings from environment variables: {'_require_service': 'True'}
+2022-11-17 16:11:21,460 INFO    MainThread:3837 [wandb_setup.py:_flush():68] Inferring run settings from compute environment: {'program': '<python with no main file>'}
+2022-11-17 16:11:21,460 INFO    MainThread:3837 [wandb_init.py:_log_setup():476] Logging user logs to /home/kyx/nnn_analysis/gnn/wandb/run-20221117_161121-1kihd72b/logs/debug.log
+2022-11-17 16:11:21,460 INFO    MainThread:3837 [wandb_init.py:_log_setup():477] Logging internal logs to /home/kyx/nnn_analysis/gnn/wandb/run-20221117_161121-1kihd72b/logs/debug-internal.log
+2022-11-17 16:11:21,460 INFO    MainThread:3837 [wandb_init.py:_jupyter_setup():426] configuring jupyter hooks <wandb.sdk.wandb_init._WandbInit object at 0x7f9f561454c0>
+2022-11-17 16:11:21,461 INFO    MainThread:3837 [wandb_init.py:init():516] calling init triggers
+2022-11-17 16:11:21,461 INFO    MainThread:3837 [wandb_init.py:init():519] wandb.init called with sweep_config: {}
+config: {'n_epoch': 400, 'params': ['dH', 'Tm'], 'n_graphconv_layer': 7, 'hidden_channels': 81, 'pooling': 'Set2Set', 'processing_steps': 5, 'n_linear_layer': 1, 'linear_hidden_channels': [128], 'graphconv_dropout': 0.01507, 'linear_dropout': 0.4976, 'batch_size': 2048, 'learning_rate': 0.006226, 'dataset': 'NNN_v0', 'mode': 'val', 'architecture': 'GraphTransformer', 'concat': False}
+2022-11-17 16:11:21,461 INFO    MainThread:3837 [wandb_init.py:init():569] starting backend
+2022-11-17 16:11:21,461 INFO    MainThread:3837 [wandb_init.py:init():573] setting up manager
+2022-11-17 16:11:21,462 INFO    MainThread:3837 [backend.py:_multiprocessing_setup():102] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2022-11-17 16:11:21,462 INFO    MainThread:3837 [wandb_init.py:init():580] backend started and connected
+2022-11-17 16:11:21,474 INFO    MainThread:3837 [wandb_run.py:_label_probe_notebook():1113] probe notebook
+2022-11-17 16:11:21,474 INFO    MainThread:3837 [wandb_run.py:_label_probe_notebook():1123] Unable to probe notebook: 'NoneType' object has no attribute 'get'
+2022-11-17 16:11:21,474 INFO    MainThread:3837 [wandb_init.py:init():658] updated telemetry
+2022-11-17 16:11:21,503 INFO    MainThread:3837 [wandb_init.py:init():693] communicating run to backend with 60 second timeout
+2022-11-17 16:11:21,815 INFO    MainThread:3837 [wandb_run.py:_on_init():2000] communicating current version
+2022-11-17 16:11:21,880 INFO    MainThread:3837 [wandb_run.py:_on_init():2004] got version response 
+2022-11-17 16:11:21,881 INFO    MainThread:3837 [wandb_init.py:init():728] starting run threads in backend
+2022-11-17 16:11:23,826 INFO    MainThread:3837 [wandb_run.py:_console_start():1980] atexit reg
+2022-11-17 16:11:23,826 INFO    MainThread:3837 [wandb_run.py:_redirect():1838] redirect: SettingsConsole.WRAP_RAW
+2022-11-17 16:11:23,826 INFO    MainThread:3837 [wandb_run.py:_redirect():1903] Wrapping output streams.
+2022-11-17 16:11:23,826 INFO    MainThread:3837 [wandb_run.py:_redirect():1925] Redirects installed.
+2022-11-17 16:11:23,827 INFO    MainThread:3837 [wandb_init.py:init():765] run started, returning control to user process
+2022-11-17 16:11:24,196 INFO    MainThread:3837 [wandb_watch.py:watch():51] Watching
+2022-11-17 16:17:39,325 ERROR   MainThread:3837 [util.py:get_module():348] Error importing optional module plotly.tools
+Traceback (most recent call last):
+  File "/home/kyx/miniconda3/envs/torch/lib/python3.9/site-packages/wandb/util.py", line 343, in get_module
+    return import_module(name)
+  File "/home/kyx/miniconda3/envs/torch/lib/python3.9/importlib/__init__.py", line 127, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+  File "<frozen importlib._bootstrap>", line 1030, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 972, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1030, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 984, in _find_and_load_unlocked
+ModuleNotFoundError: No module named 'plotly'
+2022-11-17 16:17:39,326 INFO    MainThread:3837 [wandb_run.py:_finish():1746] finishing run keyuxi/NNN_GNN/1kihd72b
+2022-11-17 16:17:39,326 INFO    MainThread:3837 [jupyter.py:save_history():448] not saving jupyter history
+2022-11-17 16:17:39,326 INFO    MainThread:3837 [jupyter.py:save_ipynb():378] not saving jupyter notebook
+2022-11-17 16:17:39,326 INFO    MainThread:3837 [wandb_init.py:_jupyter_teardown():408] cleaning up jupyter logic
+2022-11-17 16:17:39,326 INFO    MainThread:3837 [wandb_run.py:_atexit_cleanup():1949] got exitcode: 1
+2022-11-17 16:17:39,327 INFO    MainThread:3837 [wandb_run.py:_restore():1932] restore
+2022-11-17 16:17:39,327 INFO    MainThread:3837 [wandb_run.py:_restore():1938] restore done
+2022-11-17 16:17:43,273 INFO    MainThread:3837 [wandb_run.py:_footer_history_summary_info():3377] rendering history
+2022-11-17 16:17:43,278 INFO    MainThread:3837 [wandb_run.py:_footer_history_summary_info():3409] rendering summary
+2022-11-17 16:17:43,285 INFO    MainThread:3837 [wandb_run.py:_footer_sync_info():3333] logging synced files
