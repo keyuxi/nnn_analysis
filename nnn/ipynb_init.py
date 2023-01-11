@@ -46,3 +46,4 @@ matplotlib.rcParams['font.family'] = "sans-serif"
 # some constants
 kB = 0.0019872 # Bolzman constant
 C2T = 273.15 # conversion from celsius to kalvin
+bp_dict = dict(A='T', C='G', T='A', G='C')

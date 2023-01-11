@@ -32,6 +32,14 @@ def lookup_sample_df(df, df_ref, key):
     # looks up `key` in `df_ref`
     return df.apply(lambda row: df_ref.query("curve_date == '%s' & curve_num == '%s'" % (row['curve_date'], row['curve_num']))[key].values[0], axis=1)
 
+def find_blank_reference_curve_str(curve_str: str, blank_to):
+    if not np.isnan(blank_to):
+        curve_str_list = curve_str.split('_')
+        blank_curve_str = '%s_%d_%s' % (curve_str_list[0], blank_to, curve_str_list[2])
+    else:
+        blank_curve_str = curve_str
+    return blank_curve_str
+
 def read_curve(fn):
     curve = pd.read_csv(fn, header=None)
     curve.columns = ['celsius', 'absorbance']
@@ -176,9 +184,13 @@ def fit_param_d_absorbance(curve, out, celsius_min=5, celsius_max=95, smooth=Tru
 
 
 ### Master Function ###
-def fit_curve(fn, figdir='', verbose=False, debug=False, **kwargs):
+def fit_curve(fn, figdir='', verbose=False, debug=False, 
+              blank=None, **kwargs):
     def fit():
         curve = read_curve(fn)
+        if isinstance(blank, pd.DataFrame):
+            curve['absorbance'] -= blank['absorbance']
+            
         curve_name = parse_curve_name(fn)
         if verbose:
             print(curve_name['curve_str'])
@@ -205,24 +217,21 @@ def fit_curve(fn, figdir='', verbose=False, debug=False, **kwargs):
         except:
             print("Trouble with", fn)
             return dict()
-    
-    
-### Main ###
-def fit_all(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv'):
-    #----- Hardcoded QC -----
-    qc_criterion = 'rmse < 0.015 & dH_std < 10 & Tm_std < 5'
-    
-    #----- Read files -----
-    sample_sheet = read_sample_sheet(sample_sheet_file)
-    data_list = [fn for fn in absolute_file_paths(datadir) if fn.endswith('.csv')]
-    
+   
+def make_empty_result_df(data_list, sample_sheet: pd.DataFrame, blank: bool=False):
     #----- make the index and column names for result_df -----
     result_index = []
+    curve_date, curve_num, curve_name, blank_to_list = [], [], [], []
+    
     for fn in data_list:
-        curve_name = parse_curve_name(fn)
-        row = query_curve_in_df(sample_sheet, curve_name)
+        curve_dict = parse_curve_name(fn)
+        row = query_curve_in_df(sample_sheet, curve_dict)
         if len(row) > 0:
-            result_index.append(curve_name['curve_str'])
+            result_index.append(curve_dict['curve_str'])
+            curve_date.append(curve_dict['curve_date'])
+            curve_num.append(curve_dict['curve_num'])
+            curve_name.append(curve_dict['curve_name'])
+            blank_to_list.append(find_blank_reference_curve_str(curve_dict['curve_str'], row.BlankTo.values))
         elif len(row) == 0:
             data_list.remove(fn)
 
@@ -233,16 +242,98 @@ def fit_all(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv'):
                     'celsius_min', 'celsius_max', 'data_file']
 
     result_df = pd.DataFrame(index=result_index, columns=result_columns)
+    result_df.curve_date = curve_date
+    result_df.curve_num = curve_num
+    result_df.curve_name = curve_name
+    
+    if blank:
+        result_df['blank'] = blank_to_list
+    
+    return result_df
+    
+
+### Main ###
+def fit_all_manual_blank(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv'):
+    """
+    This function blanks all the curves first before fitting.
+    Reads all blank data at once first
+    """
+    #----- Hardcoded QC -----
+    qc_criterion = 'rmse < 0.015 & dH_std < 10 & Tm_std < 5'
+
+    #----- Read files -----
+    sample_sheet = read_sample_sheet(sample_sheet_file)
+    data_list = [fn for fn in absolute_file_paths(datadir) if fn.endswith('.csv')]
+    
+    #----- make the index and column names for result_df -----
+    result_df = make_empty_result_df(data_list, sample_sheet, blank=True)
+    
+    #----- read blank curves -----
+    all_blanks = np.unique(result_df['blank'])
+    blank_dict = dict()
+    for blank_str in all_blanks:
+        if not blank_str in result_df.index:
+            # check the blanks are in the dataset
+            raise "blank data %s not in the dataset!" % blank_str
+        else:
+            blank_fn = data_list[result_df.index.to_list().index(blank_str)]
+            blank_dict[blank_str] = read_curve(blank_fn)
+            
+    #----- fit curves -----
+    for fn in tqdm(data_list):
+        curve_name = parse_curve_name(fn)
+        row = query_curve_in_df(sample_sheet, curve_name)
+
+        if len(row) == 0 or (curve_name['curve_str'] in all_blanks):
+            continue
+        else:
+            result_dict = fit_curve(fn, figdir=os.path.join(datadir,'fig'), 
+                                    blank=blank_dict[result_df.loc[curve_name['curve_str'], 'blank']],
+                                    debug=True,
+                                    celsius_min=row.at[row.index[0],'celsius_min'],
+                                    celsius_max=row.at[row.index[0],'celsius_max'])
+            result_df.loc[curve_name['curve_str'], :] = result_dict
+            
+    result_df.dropna(subset=['dH', 'Tm', 'rmse'], inplace=True)
+        
+    result_df['pass_qc'] = result_df.eval(qc_criterion)
+    
+    for col in ['SEQID', 'conc_uM', 'Na_mM', 'celsius_min', 'celsius_max', 'Cuvette']:
+        result_df[col] = lookup_sample_df(result_df, sample_sheet, col)
+        
+    result_df['dG_37'] = get_dG(result_df['dH'], result_df['Tm'], celsius=37)
+    result_df['dS'] = result_df['dH'] / (result_df['Tm'] + 273.15)
+    result_df.to_csv(result_file)
+    
+    return result_df
+        
+    
+
+def fit_all(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv'):
+    #----- Hardcoded QC -----
+    qc_criterion = 'rmse < 0.015 & dH_std < 10 & Tm_std < 5'
+    
+    #----- Read files -----
+    sample_sheet = read_sample_sheet(sample_sheet_file)
+    data_list = [fn for fn in absolute_file_paths(datadir) if fn.endswith('.csv')]
+    
+    #----- make the index and column names for result_df -----
+    result_df = make_empty_result_df(data_list, sample_sheet)
 
     #----- fit curves -----
     for fn in tqdm(data_list):
         curve_name = parse_curve_name(fn)
         row = query_curve_in_df(sample_sheet, curve_name)
-        result_dict = fit_curve(fn, figdir=os.path.join(datadir,'fig'), 
-                                celsius_min=row.at[row.index[0],'celsius_min'],
-                                celsius_max=row.at[row.index[0],'celsius_max'])
 
-        result_df.loc[curve_name['curve_str'], :] = result_dict
+        if len(row) == 0:
+            print(fn)
+            continue
+        else:
+            result_dict = fit_curve(fn, figdir=os.path.join(datadir,'fig'), 
+                                    celsius_min=row.at[row.index[0],'celsius_min'],
+                                    celsius_max=row.at[row.index[0],'celsius_max'])
+
+            result_df.loc[curve_name['curve_str'], :] = result_dict
             
     result_df.dropna(inplace=True)
         

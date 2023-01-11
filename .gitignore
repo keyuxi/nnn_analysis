@@ -10,6 +10,8 @@ tmp/
 # testing
 fmax_fmin.sh
 envs/ub
+Untitled*
+uvmelt*.csv
 
 # temporary stuffs 
 __*__/
