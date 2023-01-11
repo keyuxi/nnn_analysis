@@ -344,6 +344,7 @@ def fit_all(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv'):
         
     result_df['dG_37'] = get_dG(result_df['dH'], result_df['Tm'], celsius=37)
     result_df['dS'] = result_df['dH'] / (result_df['Tm'] + 273.15)
+    result_df['isCooling'] = result_df.curve_name.apply(lambda x: 'Cooling' in x)
     result_df.to_csv(result_file)
     
     #----- Plot QC -----
@@ -377,15 +378,24 @@ def fit_all(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv'):
     
 ###### Aggregate the results in each sample #####
 def agg_fit_result(uvmelt_result_file, agg_result_file, sample_sheet_file,
-                   Tm_std_thresh=0.5, dH_std_thresh=1.5, clean=True):
+                   Tm_std_thresh=0.5, dH_std_thresh=1.5, clean=True, only_use_cooling=False):
     uv = lambda x: processing.get_combined_param(x, result_df.loc[x.index, x.name+'_std'])[0]
     uv_std = lambda x: processing.get_combined_param(x, result_df.loc[x.index, x.name+'_std'])[1]
     
     result_df = pd.read_csv(uvmelt_result_file, index_col=0).query('pass_qc')
-    agg_stat = [uv, uv_std]
-    result_agg_df = result_df.groupby(['SEQID', 'curve_date', 'curve_num']).agg(dict(dH=agg_stat, Tm=agg_stat)).reset_index()
+    if only_use_cooling:
+        result_df['isCooling'] = result_df.curve_name.apply(lambda x: 'Cooling' in x)
+        result_df.query('isCooling')
+    
+    try:
+        agg_stat = [uv, uv_std]
+        result_agg_df = result_df.groupby(['SEQID', 'curve_date', 'curve_num']).agg(dict(dH=agg_stat, Tm=agg_stat)).reset_index()
+        result_agg_df.columns = [f'{x[0]}_{x[1]}'.strip('_').replace('<lambda_0>', 'uv').replace('<lambda_1>', 'uv_std') for x in result_agg_df.columns]
+    except:
+        agg_stat = [np.median, np.std]
+        result_agg_df = result_df.groupby(['SEQID', 'curve_date', 'curve_num']).agg(dict(dH=agg_stat, Tm=agg_stat)).reset_index()
+        result_agg_df.columns = [f'{x[0]}_{x[1]}'.strip('_').replace('median', 'uv').replace('std', 'uv_std') for x in result_agg_df.columns]
 
-    result_agg_df.columns = [f'{x[0]}_{x[1]}'.strip('_').replace('<lambda_0>', 'uv').replace('<lambda_1>', 'uv_std') for x in result_agg_df.columns]
 
     result_agg_df = result_agg_df.fillna(0)
 
