@@ -114,6 +114,22 @@ def add_loop_2_seqs(loop, seqs):
     loop_seqs = [s[0:split] + loop + s[split:] for s in seqs]
     return loop_seqs
 
+def add_loops_2_seqs(loops, seqs):
+    """
+    Add a list loop sequences to a list of sequences element-wise.
+    Args:
+        loop - List[str]
+        seqs - List[str]
+    Returns:
+        loop_seqs - List[str]
+    """
+    assert np.allclose([len(seq) for seq in seqs], len(seqs[0]))
+    assert len(loops) == len(seqs)
+    
+    split = int(len(seqs[0]) / 2)
+    loop_seqs = [s[0:split] + loops[i] + s[split:] for i,s in enumerate(seqs)]
+    return loop_seqs
+
 def write_lib_2_txt(filename, var_lib, separate_scaffold=False):
     """
     Args:

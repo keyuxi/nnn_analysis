@@ -14,6 +14,7 @@ from tqdm import tqdm
 from lmfit import minimize, Minimizer, Parameters, report_fit
 from scipy.interpolate import interp1d
 from scipy import signal
+from hampel import hampel
 from .util import *
 from . import processing
 
@@ -50,6 +51,13 @@ def read_sample_sheet(fn):
     sample_df = pd.read_csv(fn, index_col=0)
     sample_df['curve_date'] = sample_df['curve_date'].astype(str)
     sample_df['curve_num'] = sample_df['curve_num'].astype(str)
+    
+    #----- fill out default settings -----
+    sample_df.celsius_min.fillna(sample_df.MinTemperature, inplace=True)
+    sample_df.celsius_max.fillna(sample_df.MaxTemperature, inplace=True)
+    # sample_df.loc[np.logical_and(sample_df.Blank == "manual", sample_df.SEQID != 'blank'), "BlankTo"].fillna(7)
+    sample_df.loc[:,"BlankTo"].fillna(int(7), inplace=True)
+    
     return sample_df
 
 def parse_curve_name(fn):
@@ -70,14 +78,84 @@ def format_fit_result(out):
 
 def plot_curve_fit_result(row):
     curve = read_curve(row['data_file'])
+    curve_predict = curve_model(curve.celsius, **{x:row[x] for x in ['dH','Tm','fmax','fmin','slope']})
     plt.plot(curve.celsius, curve.absorbance, '.')
     plt.plot(curve.celsius, 
-             curve_model(curve.celsius, **{x:row[x] for x in ['dH','Tm','fmax','fmin','slope']}))
+             curve_predict - curve_predict[0] + curve.absorbance[0])
     plt.axvline(row['Tm'], linestyle='--', c='gray')
-    plt.title('%s' % (row['data_file']))
+    
+    if 'SEQID' in row.index:
+        plt.title('%s %s' % (row['SEQID'], row['curve_name']))
+    else:
+        plt.title('%s' % (row['data_file']))
     sns.despine()
     plt.show()
     
+def plot_curve_preview_of_datadir(datadir:str, sample_sheet_file:str, plot_fn:str=None):
+    """
+    Plot raw absorbance of all curves in a single pdf file for preview and troubleshotting.
+    Upper row: raw
+    Lower row: if maunal blank, the blanked curves
+    """
+    color_dict = dict(
+        MeltingCurve='#a6cee3',
+        CoolingCurve='#1f78b4',
+        SecondaryMeltingCurve='#b2df8a',
+        SecondaryCoolingCurve='#33a02c',
+        TertiaryMeltingCurve='#fb9a99',
+        TertiaryCoolingCurve='#e31a1c'
+    )
+    
+    if plot_fn is None:
+        plot_fn = os.path.join(datadir, "preview_raw_absorbance_all_curves.pdf")
+        
+    data_list = [fn for fn in absolute_file_paths(datadir) if fn.endswith('.csv')]
+    sample_sheet = read_sample_sheet(sample_sheet_file)#.iloc[-21:,:]
+    
+    result_df = make_empty_result_df(data_list, sample_sheet, blank=True)
+    result_df.sort_values(by=['curve_date', 'curve_num'], inplace=True)
+    result_df['SEQID'] = lookup_sample_df(result_df, sample_sheet, 'SEQID')
+    result_df['Blank'] = lookup_sample_df(result_df, sample_sheet, 'Blank')
+    curve_dates = np.unique(result_df.curve_date)
+    figs = [None for _ in range(len(curve_dates))]
+    
+    for i,curve_date in enumerate(curve_dates):
+        formatted_curve_date = '%s-%s-%s %s:00' % (curve_date[:2], curve_date[2:4], curve_date[4:6], curve_date[6:])
+        figs[i], ax = plt.subplots(2,7,figsize=(12,4), sharex=False, sharey=False)
+        # ax=ax.flatten()
+        plt.suptitle(formatted_curve_date)
+        exp_df = result_df.query('curve_date == "%s"'%curve_date)
+        for j,row in exp_df.iterrows():
+            # raw curves
+            curve = read_curve(row.data_file)
+            curve_num = int(row.curve_num)
+            curve_color = color_dict[row.curve_name]
+            ax[0,curve_num-1].plot(curve.celsius, curve.absorbance, 
+                                 c=curve_color, linewidth=2)
+            try:
+                seqid = row['SEQID']
+            except:
+                seqid = ""
+            ax[0,curve_num-1].set_title(seqid)
+            
+            # blanked curves
+            if row.Blank == 'manual':
+                try:
+                    blank_curve = read_curve(exp_df.query('curve_num == "7" & curve_name == "%s"'%row.curve_name).data_file.values[0])
+                    blanked_curve = curve.absorbance - blank_curve.absorbance
+                    ax[1,curve_num-1].plot(curve.celsius, blanked_curve,
+                                           c=curve_color, linewidth=2, linestyle=':')
+                except:
+                    pass
+                
+            sns.despine()
+            
+        _ = [ax[1,i].set_xlabel('Celsius (°C)') for i in range(7)]
+        _ = [ax[i,0].set_ylabel('Absorbance') for i in range(2)]
+                     
+    save_multi_image(plot_fn, figs)
+    
+    return result_df
 
 ### Directly fit the curves ###
 def curve_model(x, dH, Tm, fmin, fmax, slope):
@@ -100,12 +178,14 @@ def fit_param_direct(curve, Tm=None, celsius_min=5, celsius_max=95, smooth=True,
         pfit.add(name='Tm', value=Tm, vary=False)
         
     pfit.add(name='fmax', value=2*data_max, min=data_min, max=20*data_max)
-    pfit.add(name='fmin', value=0.2*data_min, min=0, max=data_max)
+    pfit.add(name='fmin', value=max(0.2*data_min, 0.01), min=-0.1, max=data_max)
     pfit.add(name='slope', value = 1e-5, max=5.0, min=-1.0)
 
     curve_used = curve.query(f'celsius >= {celsius_min} & celsius <= {celsius_max}')
     if smooth:
-        curve_used.loc[:,'absorbance'] = signal.savgol_filter(curve_used.loc[:,'absorbance'], 9, 3)
+        # Anomaly detection with hampel
+        outlier_idx = hampel(curve_used.loc[:, 'absorbance'])
+        curve_used.drop(index = curve_used.index[outlier_idx], inplace=True)
 
     out_tmp = minimize(residual, pfit, args=(curve_used.celsius,), 
                    kws={'data': curve_used.absorbance})
@@ -121,6 +201,7 @@ def fit_param_direct(curve, Tm=None, celsius_min=5, celsius_max=95, smooth=True,
     
     fig, ax = plt.subplots(figsize=(4,3))
     ax.plot(curve.celsius, curve.absorbance, '+', c='purple')
+    ax.plot(curve_used.celsius, curve_used.absorbance, 'x', c='g')
     ax.plot(curve_used.celsius, best_fit, 'orange', linewidth=2.5)
     ax.set_xlabel('temperature (°C)')
     ax.set_ylabel(r'absorbance')
@@ -135,21 +216,50 @@ def fit_Tm_d_absorbance(curve, celsius_min=5, celsius_max=95):
     """
     For a first pass before direct fit. Only fits Tm because fmax and fmin are unknown.
     """
+    # == Calculate d_p_unfold ==
     curve_used = curve.query(f'celsius >= {celsius_min} & celsius <= {celsius_max}').sort_values(by='celsius')
+    # Upsampled 10x
     x = np.arange(curve_used.celsius.iloc[0], curve_used.celsius.iloc[-1], 0.1)
     signal_used = signal.savgol_filter(curve_used.absorbance, 9, 3, mode='nearest')
     f = interp1d(curve_used.celsius, 
                  signal_used, 
                  kind='cubic')
+    # dx/dT = dx/0.1, where dT = 0.1 from upsampling
     d_p_unfold = np.diff(f(x)) * 10
     d_p_unfold = signal.savgol_filter(d_p_unfold, 99, 3)
+    
+    # == Find a reasonable range to use ==
+    is_usable = True
+    d_p_sign = np.sign(d_p_unfold)
+    # tag BAD if more than a certain part of the curve is decreasing
+    if np.count_nonzero(d_p_sign == -1) > 0.9 * len(d_p_unfold):
+        is_usable = False
+    
+    # common problem: decreasing at high temperature
+    # solution: overwrite celsius_max when it first starts to decrease monotomically
+    # doesn't affect
+    win_len = 15 # 1.5 °C
+    local_sum = np.convolve(d_p_sign, np.ones(win_len), 'valid')
+    # if not found, celsius_max_idx will be 0
+    celsius_max_idx = np.argmax(local_sum <= win_len + 1)
+    if celsius_max_idx > 0:
+        celsius_max = x[celsius_max_idx]
+    
+    # == Call peaks ==
     peaks = signal.find_peaks(d_p_unfold)[0]
-    ind_max = np.argmax(d_p_unfold[peaks])
-    Tm = x[peaks[ind_max]]
-    return Tm
+    try:
+        ind_max = np.argmax(d_p_unfold[peaks])
+        Tm = x[peaks[ind_max]]
+    except:
+        Tm = np.nan
+        
+    result_dict = dict(Tm=Tm, is_usable=is_usable, celsius_min=celsius_min, celsius_max=celsius_max)
+    return result_dict
 
 def fit_param_d_absorbance(curve, out, celsius_min=5, celsius_max=95, smooth=True, plot_title=''):
-
+    """
+    Deprecated. Other parameters than Tm are not very reliable from this method.
+    """
     curve_used = curve.query(f'celsius >= {celsius_min} & celsius <= {celsius_max}').sort_values(by='celsius')
     x = np.arange(curve_used.celsius.iloc[0], curve_used.celsius.iloc[-1], 0.1)
     signal_used = signal.savgol_filter(curve_used.absorbance, 9, 3, mode='nearest')
@@ -190,15 +300,24 @@ def fit_curve(fn, figdir='', verbose=False, debug=False,
         curve = read_curve(fn)
         if isinstance(blank, pd.DataFrame):
             curve['absorbance'] -= blank['absorbance']
+            # Shift up so all values are positive
+            curve['absorbance'] -= np.min(curve['absorbance'].values) + 0.01
             
         curve_name = parse_curve_name(fn)
         if verbose:
             print(curve_name['curve_str'])
-        Tm = fit_Tm_d_absorbance(curve, **kwargs)
-        out = fit_param_direct(curve, Tm=Tm, plot_title=curve_name['curve_str'], **kwargs)
+        d_absorbance_result_dict = fit_Tm_d_absorbance(curve, **kwargs)
+        if not d_absorbance_result_dict['is_usable']:
+            # give up fast and run away
+            raise Exception("Sorry, curve is too crazy for %s"%fn)
+            
+        Tm = d_absorbance_result_dict['Tm']
+        kwargs['celsius_max'] = d_absorbance_result_dict['celsius_max']
+        out = fit_param_direct(curve, Tm=Tm, 
+                               plot_title=curve_name['curve_str'], **kwargs)
         save_fig(os.path.join(figdir, curve_name['curve_date'], f"{curve_name['curve_num']}_{curve_name['curve_name']}_direct_fit.png"))
         # result = fit_param_d_absorbance(curve, out, plot_title=curve_name['curve_str'], **kwargs)
-        save_fig(os.path.join(figdir, curve_name['curve_date'], f"{curve_name['curve_num']}_{curve_name['curve_name']}_d_p_unfold.png"))
+        # save_fig(os.path.join(figdir, curve_name['curve_date'], f"{curve_name['curve_num']}_{curve_name['curve_name']}_d_p_unfold.png"))
         result_dict = format_fit_result(out)
         result_dict.update(kwargs)
         result_dict.update(curve_name)
@@ -215,13 +334,13 @@ def fit_curve(fn, figdir='', verbose=False, debug=False,
             result_dict = fit()
             return result_dict
         except:
-            print("Trouble with", fn)
+            # print("Trouble with", fn)
             return dict()
    
 def make_empty_result_df(data_list, sample_sheet: pd.DataFrame, blank: bool=False):
     #----- make the index and column names for result_df -----
     result_index = []
-    curve_date, curve_num, curve_name, blank_to_list = [], [], [], []
+    curve_date, curve_num, curve_name, blank_to_list, data_file = [], [], [], [], []
     
     for fn in data_list:
         curve_dict = parse_curve_name(fn)
@@ -231,7 +350,11 @@ def make_empty_result_df(data_list, sample_sheet: pd.DataFrame, blank: bool=Fals
             curve_date.append(curve_dict['curve_date'])
             curve_num.append(curve_dict['curve_num'])
             curve_name.append(curve_dict['curve_name'])
-            blank_to_list.append(find_blank_reference_curve_str(curve_dict['curve_str'], row.BlankTo.values))
+            data_file.append(fn)
+            if row.Blank.values[0] == 'manual':
+                blank_to_list.append(find_blank_reference_curve_str(curve_dict['curve_str'], row.BlankTo.values[0]))
+            else:
+                blank_to_list.append('no_manual_blank')
         elif len(row) == 0:
             data_list.remove(fn)
 
@@ -242,27 +365,28 @@ def make_empty_result_df(data_list, sample_sheet: pd.DataFrame, blank: bool=Fals
                     'celsius_min', 'celsius_max', 'data_file']
 
     result_df = pd.DataFrame(index=result_index, columns=result_columns)
-    result_df.curve_date = curve_date
-    result_df.curve_num = curve_num
+    result_df.curve_date = np.array(curve_date, dtype=str)
+    result_df.curve_num = np.array(curve_num, dtype=str)
     result_df.curve_name = curve_name
-    
+    result_df.data_file = data_file
+
     if blank:
         result_df['blank'] = blank_to_list
     
     return result_df
     
 
-### Main ###
-def fit_all_manual_blank(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv'):
+### Fit from sample_sheet ###
+def fit_all_manual_blank(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv',
+                         qc_criterion = 'rmse < 0.015 & dH_std < 10 & Tm_std < 5'):
     """
     This function blanks all the curves first before fitting.
-    Reads all blank data at once first
+    If not manual blank or cannot find blank, use the original curve.
+    Reads and caches all blank data at once first.
     """
-    #----- Hardcoded QC -----
-    qc_criterion = 'rmse < 0.015 & dH_std < 10 & Tm_std < 5'
 
     #----- Read files -----
-    sample_sheet = read_sample_sheet(sample_sheet_file)
+    sample_sheet = read_sample_sheet(sample_sheet_file)#.query("Blank == 'manual'")
     data_list = [fn for fn in absolute_file_paths(datadir) if fn.endswith('.csv')]
     
     #----- make the index and column names for result_df -----
@@ -274,7 +398,8 @@ def fit_all_manual_blank(datadir:str, sample_sheet_file:str, result_file:str='uv
     for blank_str in all_blanks:
         if not blank_str in result_df.index:
             # check the blanks are in the dataset
-            raise "blank data %s not in the dataset!" % blank_str
+            print( "blank data %s not in the dataset!" % blank_str )
+            blank_dict[blank_str] = 0
         else:
             blank_fn = data_list[result_df.index.to_list().index(blank_str)]
             blank_dict[blank_str] = read_curve(blank_fn)
@@ -287,9 +412,14 @@ def fit_all_manual_blank(datadir:str, sample_sheet_file:str, result_file:str='uv
         if len(row) == 0 or (curve_name['curve_str'] in all_blanks):
             continue
         else:
+            try:
+                blank_curve = blank_dict[result_df.loc[curve_name['curve_str'], 'blank']]
+            except:
+                blank_curve = 0
+                
             result_dict = fit_curve(fn, figdir=os.path.join(datadir,'fig'), 
-                                    blank=blank_dict[result_df.loc[curve_name['curve_str'], 'blank']],
-                                    debug=True,
+                                    blank=blank_curve,
+                                    debug=False,
                                     celsius_min=row.at[row.index[0],'celsius_min'],
                                     celsius_max=row.at[row.index[0],'celsius_max'])
             result_df.loc[curve_name['curve_str'], :] = result_dict
@@ -298,6 +428,7 @@ def fit_all_manual_blank(datadir:str, sample_sheet_file:str, result_file:str='uv
         
     result_df['pass_qc'] = result_df.eval(qc_criterion)
     
+    result_df['SEQID'] = ''
     for col in ['SEQID', 'conc_uM', 'Na_mM', 'celsius_min', 'celsius_max', 'Cuvette']:
         result_df[col] = lookup_sample_df(result_df, sample_sheet, col)
         
@@ -309,12 +440,12 @@ def fit_all_manual_blank(datadir:str, sample_sheet_file:str, result_file:str='uv
         
     
 
-def fit_all(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv'):
+def fit_all_no_blank(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv'):
     #----- Hardcoded QC -----
     qc_criterion = 'rmse < 0.015 & dH_std < 10 & Tm_std < 5'
     
     #----- Read files -----
-    sample_sheet = read_sample_sheet(sample_sheet_file)
+    sample_sheet = read_sample_sheet(sample_sheet_file).query("Blank != 'manual'")
     data_list = [fn for fn in absolute_file_paths(datadir) if fn.endswith('.csv')]
     
     #----- make the index and column names for result_df -----
@@ -376,28 +507,45 @@ def fit_all(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv'):
     
     return result_df
     
+def fit_all(datadir:str, sample_sheet_file:str, result_file:str='uvmelt.csv'):
+    # noblank_result_df = fit_all_no_blank(datadir, sample_sheet_file, result_file.replace(".csv", "_no_blank.csv"))
+    blank_result_df = fit_all_manual_blank(datadir, sample_sheet_file, result_file.replace(".csv", "_manual_blank.csv"))
+    return blank_result_df
+    
 ###### Aggregate the results in each sample #####
 def agg_fit_result(uvmelt_result_file, agg_result_file, sample_sheet_file,
+                   single_curve_qc_criteria=None,
                    Tm_std_thresh=0.5, dH_std_thresh=1.5, clean=True, only_use_cooling=False):
-    uv = lambda x: processing.get_combined_param(x, result_df.loc[x.index, x.name+'_std'])[0]
-    uv_std = lambda x: processing.get_combined_param(x, result_df.loc[x.index, x.name+'_std'])[1]
+    """
+    Aggregates multiple heat-cool cycles for a given cuvette, e.g. sample level
+    Not aggregated to sequence level!
+    """
+    uv = lambda x: processing.get_combined_param_bt(x, result_df.loc[x.index, x.name+'_std'])['p']
+    uv_std = lambda x: processing.get_combined_param_bt(x, result_df.loc[x.index, x.name+'_std'])['e']
     
-    result_df = pd.read_csv(uvmelt_result_file, index_col=0).query('pass_qc')
+    if single_curve_qc_criteria is None:
+        result_df = pd.read_csv(uvmelt_result_file, index_col=0).query('pass_qc')
+    else:
+        result_df = pd.read_csv(uvmelt_result_file, index_col=0)
+        result_df['pass_qc'] = result_df.eval(single_curve_qc_criteria)
+        sns.scatterplot(data=result_df.query('dH_std < 1e2 & Tm_std < 50'), x='dH_std', y='Tm_std', hue='pass_qc')
+            
     if only_use_cooling:
         result_df['isCooling'] = result_df.curve_name.apply(lambda x: 'Cooling' in x)
         result_df.query('isCooling')
     
     try:
-        agg_stat = [uv, uv_std]
+        agg_stat = [uv, uv_std, len]
         result_agg_df = result_df.groupby(['SEQID', 'curve_date', 'curve_num']).agg(dict(dH=agg_stat, Tm=agg_stat)).reset_index()
         result_agg_df.columns = [f'{x[0]}_{x[1]}'.strip('_').replace('<lambda_0>', 'uv').replace('<lambda_1>', 'uv_std') for x in result_agg_df.columns]
     except:
-        agg_stat = [np.median, np.std]
+        agg_stat = [np.median, np.std, len]
         result_agg_df = result_df.groupby(['SEQID', 'curve_date', 'curve_num']).agg(dict(dH=agg_stat, Tm=agg_stat)).reset_index()
         result_agg_df.columns = [f'{x[0]}_{x[1]}'.strip('_').replace('median', 'uv').replace('std', 'uv_std') for x in result_agg_df.columns]
 
-
     result_agg_df = result_agg_df.fillna(0)
+    result_agg_df.rename(columns=dict(dH_len='n_curve'), inplace=True)
+    result_agg_df.drop(columns='Tm_len', inplace=True)
 
     result_agg_df['dG_37_uv'] = get_dG(dH=result_agg_df.dH_uv, Tm=result_agg_df.Tm_uv, celsius=37)
     result_agg_df['dG_37_uv_std'] = get_dG_err(result_agg_df.dH_uv, result_agg_df.dH_uv_std, 
@@ -407,22 +555,25 @@ def agg_fit_result(uvmelt_result_file, agg_result_file, sample_sheet_file,
     result_agg_df['dS_uv_std'] = get_dS_err(result_agg_df.dH_uv, result_agg_df.dH_uv_std, 
                                             result_agg_df.Tm_uv, result_agg_df.Tm_uv_std)
     
-    result_agg_df['is_hairpin'] = result_agg_df.SEQID.apply(lambda x: False if ('_' in x) else True)
+    #TODO
+    result_agg_df['is_hairpin'] = result_agg_df.SEQID.apply(lambda x: False if ('_' in x) or x.startswith('D') else True)
     result_agg_df['SEQID'] = result_agg_df.SEQID.apply(lambda x: x.split('_')[0] if '_' in x else x)
     
     sample_sheet = read_sample_sheet(sample_sheet_file)
-    for col in ['Na_mM', 'conc_uM', 'purification']:
+    for col in ['Na_mM', 'conc_uM', 'Purification']:
         result_agg_df[col] = lookup_sample_df(result_agg_df, sample_sheet, col)
         
     qc_criterion = 'Tm_uv_std < %f & dH_uv_std < %f' % (Tm_std_thresh, dH_std_thresh)
-    fig, ax = plt.subplots(figsize=(4,4))
+    fig, ax = plt.subplots(1, 2, figsize=(8,4))
     sns.scatterplot(data=result_agg_df,
-                    x='dH_uv_std', y='Tm_uv_std', hue='curve_date',
-                    palette='tab20', ax=ax)
-    ax.axhline(Tm_std_thresh, linestyle='--', c='gray')
-    ax.axvline(dH_std_thresh, linestyle='--', c='gray')
-    ax.set_title('%.2f%% (%d / %d) variants passed QC' % 
+                    x='dH_uv_std', y='Tm_uv_std', hue='n_curve',
+                    palette='plasma', ax=ax[0])
+    ax[0].axhline(Tm_std_thresh, linestyle='--', c='gray')
+    ax[0].axvline(dH_std_thresh, linestyle='--', c='gray')
+    ax[0].set_title('%.2f%% (%d / %d) variants passed QC' % 
                  (100 * result_agg_df.eval(qc_criterion).sum() / len(result_agg_df), result_agg_df.eval(qc_criterion).sum(), len(result_agg_df)))
+    sns.scatterplot(data=result_df.query('dH_std < 1e2 & Tm_std <20'), x='dH_std', y='Tm_std', hue='rmse', ax=ax[1])
+    ax[1].set_title('single curves used')
     sns.despine()
     save_fig(agg_result_file.replace('.csv', '.pdf'), fig)
     

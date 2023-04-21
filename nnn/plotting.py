@@ -401,13 +401,28 @@ def plot_candidate_variant_summary(candidate, df_with_targetstruct, df_with_curv
     print('\n%d clusters'%df_with_curve.loc[candidate,'n_clusters'])
 
 
-def draw_target_mfe_struct(row):
+def draw_target_struct(seqid, arr, ax=None):
+    if ax is None:
+        fig, ax = plt.subplots()
+        
+    draw_struct(arr.loc[seqid, 'RefSeq'], arr.loc[seqid, 'TargetStruct'], ax=ax)
+    ax.set_title(seqid)
+    
+
+def draw_target_mfe_struct(row=None, seq=None, target_struct=None, celsius=0.0):
+    """
+    Either supply `row` with `RefSeq` and `TargetStruct` fileds or `seq` and `target_struct` directly
+    """
+    if row is not None:
+        seq = row.RefSeq,
+        target_struct = row.TargetStruct
+        
     _, ax = plt.subplots(1,3,figsize=(9,3))
-    draw_struct(row.RefSeq, row.TargetStruct, ax=ax[0])
+    draw_struct(seq, target_struct, ax=ax[0])
     ax[0].set_title('Target')
-    draw_struct(row.RefSeq, row.mfe_struct_Na_50mM, ax=ax[1])
-    ax[1].set_title('MFE, 50mM $Na^+$')
-    draw_struct(row.RefSeq, row.mfe_struct_Na_1M, ax=ax[2])
+    draw_struct(seq, util.get_mfe_struct(seq, sodium=0.081, celsius=celsius), ax=ax[1])
+    ax[1].set_title('MFE, 81mM $Na^+$')
+    draw_struct(seq, util.get_mfe_struct(seq, sodium=0.081,celsius=celsius), ax=ax[2])
     ax[2].set_title('MFE, 1M $Na^+$')
 
 

@@ -61,6 +61,26 @@ def get_combined_param(params, errors):
     return p, np.sqrt(e)
 
 
+def get_combined_param_bt(params, errors, n_sampling = 100):
+    """
+    Bootstrapped combined error
+    Args:
+        params, errors - (n_variant, n_rep) array like
+    Returns:
+        parameter and error - (n_variant, 2) array, of the combined dataset
+    """
+    p, e = None, None
+    n_variant, n_rep = params.shape
+    rnd_sample = np.array([np.random.normal(params, errors) for _ in range(n_sampling)])
+    rnd_sample = np.moveaxis(rnd_sample, 0, 2) # (n_variant, n_rep, n_sampling)
+    rnd_sample = np.reshape(rnd_sample, (n_variant, n_rep * n_sampling), order='C') # (n_variant, n_rep * n_sampling)
+    p = np.median(rnd_sample, axis=1)
+    ub = np.percentile(rnd_sample, 95, axis=1)
+    lb = np.percentile(rnd_sample, 5, axis=1)
+    e = (ub - lb) / 2
+    return dict(p=p, e=e, ub=ub, lb=lb)
+
+
 def combine_replicates(reps, rep_names, 
                        error_type='lb_ub', param=None, verbose=True) -> pd.DataFrame:
     """

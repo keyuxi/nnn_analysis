@@ -49,10 +49,12 @@ def save_fig(filename, fig=None):
     else:
         fig.savefig(filename, dpi=300, bbox_inches='tight')
         
-def save_multi_image(filename):
+def save_multi_image(filename, figs=None):
     pp = PdfPages(filename)
-    fig_nums = plt.get_fignums()
-    figs = [plt.figure(n) for n in fig_nums]
+    if figs is None:
+        fig_nums = plt.get_fignums()
+        figs = [plt.figure(n) for n in fig_nums]
+        
     for fig in figs:
         fig.savefig(pp, format='pdf')
     pp.close()
