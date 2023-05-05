@@ -21,6 +21,11 @@ from . import processing
 import warnings
 warnings.filterwarnings("ignore")
 
+def get_blanked_fn(fn):
+    split_fn = os.path.splitext(fn)
+    blanked_fn = split_fn[0] + '_blanked' + split_fn[1]
+    return blanked_fn
+
 def query_curve_in_df(df, curve_name):
     """
     Args:
@@ -70,15 +75,23 @@ def parse_curve_name(fn):
 
 def format_fit_result(out):
     result_dict = {}
-    for p in ('dH', 'Tm', 'fmax', 'fmin', 'slope'):
+    for p in ('dH', 'Tm', 'fmax', 'fmin', 's1', 's2'):
         result_dict[p] = out.params[p].value
         result_dict[p+'_std'] = out.params[p].stderr
     result_dict['rmse'] = np.sqrt(np.mean(np.square(out.residual)))
     return result_dict
 
-def plot_curve_fit_result(row):
-    curve = read_curve(row['data_file'])
-    curve_predict = curve_model(curve.celsius, **{x:row[x] for x in ['dH','Tm','fmax','fmin','slope']})
+def plot_curve_basic(curve):
+    plt.plot(curve.celsius, curve.absorbance, '.')
+
+def plot_curve_fit_result(row, return_curve=False):
+    fn = row['data_file']
+    blanked_fn = get_blanked_fn(fn)
+    if os.path.isfile(blanked_fn):
+        fn = blanked_fn
+    curve = read_curve(fn)
+    
+    curve_predict = curve_model(curve.celsius, **{x:row[x] for x in ['dH','Tm','fmax','fmin','s1', 's2']})
     plt.plot(curve.celsius, curve.absorbance, '.')
     plt.plot(curve.celsius, 
              curve_predict - curve_predict[0] + curve.absorbance[0])
@@ -90,6 +103,9 @@ def plot_curve_fit_result(row):
         plt.title('%s' % (row['data_file']))
     sns.despine()
     plt.show()
+    
+    if return_curve:
+        return curve
     
 def plot_curve_preview_of_datadir(datadir:str, sample_sheet_file:str, plot_fn:str=None):
     """
@@ -157,14 +173,37 @@ def plot_curve_preview_of_datadir(datadir:str, sample_sheet_file:str, plot_fn:st
     
     return result_df
 
+def get_2nd_diff_autocorrelation(y, plot=False):
+    y = y - np.mean(y)
+    yacorr = np.correlate(y, y, 'full')[:len(y)]
+    yacorr = yacorr / np.var(y) / len(y)
+    yacorr_2diff = np.diff(yacorr, n=2)
+    if plot:
+        _,ax = plt.subplots(1,3, figsize=(12,2))
+        ax[0].plot(y)
+        ax[1].plot(yacorr)
+        ax[2].plot(yacorr_2diff)
+        
+    return yacorr_2diff
+
+def qc_blank_curve(curve):
+    isgood = True
+    zscore = np.nanstd(curve.absorbance) / np.nanmedian(curve.absorbance)
+    if zscore > 0.2:
+        isgood = False
+    acorr_2diff = get_2nd_diff_autocorrelation(curve.absorbance)
+    if np.max(np.abs(acorr_2diff)) > 0.005:
+        isgood = False
+    return isgood
+
 ### Directly fit the curves ###
-def curve_model(x, dH, Tm, fmin, fmax, slope):
+def curve_model(x, dH, Tm, fmin, fmax, s1, s2):
     # define the function
-    return fmin + slope * x + ((fmax - fmin)/(1 + np.exp(dH /0.0019872 * ((Tm + 273.15)**(-1) - (x + 273.15)**(-1)))))
+    return fmin + s1 * x + (((s2 - s1) * x + fmax - fmin)/(1 + np.exp(dH /0.0019872 * ((Tm + 273.15)**(-1) - (x + 273.15)**(-1)))))
 
 def residual(pars, x, data):
-    dH, Tm, fmax, fmin, slope = pars['dH'], pars['Tm'], pars['fmax'], pars['fmin'], pars['slope']
-    model = curve_model(x, dH, Tm, fmin, fmax, slope)
+    dH, Tm, fmax, fmin, s1, s2 = pars['dH'], pars['Tm'], pars['fmax'], pars['fmin'], pars['s1'], pars['s2']
+    model = curve_model(x, dH, Tm, fmin, fmax, s1, s2)
     return model - data
 
 def fit_param_direct(curve, Tm=None, celsius_min=5, celsius_max=95, smooth=True, plot_title=''):
@@ -179,7 +218,9 @@ def fit_param_direct(curve, Tm=None, celsius_min=5, celsius_max=95, smooth=True,
         
     pfit.add(name='fmax', value=2*data_max, min=data_min, max=20*data_max)
     pfit.add(name='fmin', value=max(0.2*data_min, 0.01), min=-0.1, max=data_max)
-    pfit.add(name='slope', value = 1e-5, max=5.0, min=-1.0)
+    pfit.add(name='s1', value = 1e-5, max=5.0, min=-1.0)
+    pfit.add(name='s2', value = 1e-5, max=2.0, min=-2.0)
+    # pfit.add(name='delta_f', )
 
     curve_used = curve.query(f'celsius >= {celsius_min} & celsius <= {celsius_max}')
     if smooth:
@@ -191,7 +232,7 @@ def fit_param_direct(curve, Tm=None, celsius_min=5, celsius_max=95, smooth=True,
                    kws={'data': curve_used.absorbance})
     
     pfit['Tm'].set(vary=True)
-    for p in ['dH', 'fmin', 'fmax', 'slope']:
+    for p in ['dH', 'fmin', 'fmax', 's1', 's2']:
         pfit[p].set(value=out_tmp.params[p].value)
         
     out = minimize(residual, pfit, args=(curve_used.celsius,), 
@@ -218,6 +259,13 @@ def fit_Tm_d_absorbance(curve, celsius_min=5, celsius_max=95):
     """
     # == Calculate d_p_unfold ==
     curve_used = curve.query(f'celsius >= {celsius_min} & celsius <= {celsius_max}').sort_values(by='celsius')
+    acorr_2diff = get_2nd_diff_autocorrelation(curve_used.absorbance)
+
+    if curve_used.absorbance.isnull().values.any() or np.max(np.abs(acorr_2diff)) > 0.005:
+        # run away fast
+        # if has bad values or jumps (intervention) in the series
+        return dict(is_usable=False, Tm=np.nan)
+        
     # Upsampled 10x
     x = np.arange(curve_used.celsius.iloc[0], curve_used.celsius.iloc[-1], 0.1)
     signal_used = signal.savgol_filter(curve_used.absorbance, 9, 3, mode='nearest')
@@ -232,7 +280,7 @@ def fit_Tm_d_absorbance(curve, celsius_min=5, celsius_max=95):
     is_usable = True
     d_p_sign = np.sign(d_p_unfold)
     # tag BAD if more than a certain part of the curve is decreasing
-    if np.count_nonzero(d_p_sign == -1) > 0.9 * len(d_p_unfold):
+    if np.count_nonzero(d_p_sign == -1) > 0.2 * len(d_p_unfold):
         is_usable = False
     
     # common problem: decreasing at high temperature
@@ -242,8 +290,11 @@ def fit_Tm_d_absorbance(curve, celsius_min=5, celsius_max=95):
     local_sum = np.convolve(d_p_sign, np.ones(win_len), 'valid')
     # if not found, celsius_max_idx will be 0
     celsius_max_idx = np.argmax(local_sum <= win_len + 1)
+    celsius_min_idx = np.argmax(local_sum >= win_len - 1)
     if celsius_max_idx > 0:
         celsius_max = x[celsius_max_idx]
+    if celsius_min_idx > 0:
+        celsius_min = x[celsius_min_idx]
     
     # == Call peaks ==
     peaks = signal.find_peaks(d_p_unfold)[0]
@@ -287,7 +338,7 @@ def fit_param_d_absorbance(curve, out, celsius_min=5, celsius_max=95, smooth=Tru
     result['dH_diff'] = - d_p_unfold[peak] * 4 * 0.0019872 * (result['Tm_diff'] + 273.15)**2
     result['dS_diff'] = result['dH_diff'] / (result['Tm_diff'] + 273.15)
     result['dG_37_diff'] = get_dG(result['dH_diff'], result['Tm_diff'], 37)
-    result['rmse_diff'] = rmse(curve_model(curve_used.celsius, result['dH_diff'], result['Tm_diff'], out.params['fmin'], out.params['fmax'], out.params['slope']),
+    result['rmse_diff'] = rmse(curve_model(curve_used.celsius, result['dH_diff'], result['Tm_diff'], out.params['fmin'], out.params['fmax'], out.params['s1'], out.params['s2']),
                                            curve_used.absorbance.values)
     
     return result
@@ -300,14 +351,21 @@ def fit_curve(fn, figdir='', verbose=False, debug=False,
         curve = read_curve(fn)
         if isinstance(blank, pd.DataFrame):
             curve['absorbance'] -= blank['absorbance']
-            # Shift up so all values are positive
-            curve['absorbance'] -= np.min(curve['absorbance'].values) + 0.01
+        elif isinstance(blank, float):
+            curve['absorbance'] -= blank
+        
+        # Shift up so all values are positive
+        curve['absorbance'] = curve['absorbance'] - np.min(curve['absorbance'].values) + 0.01
+        
+        # Save the blanked curve to disk
+        blanked_fn = get_blanked_fn(fn)
+        curve.to_csv(blanked_fn, index=False, header=False)
             
         curve_name = parse_curve_name(fn)
         if verbose:
             print(curve_name['curve_str'])
         d_absorbance_result_dict = fit_Tm_d_absorbance(curve, **kwargs)
-        if not d_absorbance_result_dict['is_usable']:
+        if not d_absorbance_result_dict['is_usable'] or np.isnan(d_absorbance_result_dict['Tm']):
             # give up fast and run away
             raise Exception("Sorry, curve is too crazy for %s"%fn)
             
@@ -361,7 +419,7 @@ def make_empty_result_df(data_list, sample_sheet: pd.DataFrame, blank: bool=Fals
     result_columns = ['curve_date', 'curve_num', 'curve_name',
                     'dH', 'dH_std', 'Tm', 'Tm_std', 
                     'fmax', 'fmax_std', 'fmin', 'fmin_std', 
-                    'slope', 'slope_std', 'rmse',
+                    's1', 's1_std', 's2', 's2_std', 'rmse',
                     'celsius_min', 'celsius_max', 'data_file']
 
     result_df = pd.DataFrame(index=result_index, columns=result_columns)
@@ -387,7 +445,7 @@ def fit_all_manual_blank(datadir:str, sample_sheet_file:str, result_file:str='uv
 
     #----- Read files -----
     sample_sheet = read_sample_sheet(sample_sheet_file)#.query("Blank == 'manual'")
-    data_list = [fn for fn in absolute_file_paths(datadir) if fn.endswith('.csv')]
+    data_list = [fn for fn in absolute_file_paths(datadir) if (fn.endswith('.csv') and (not fn.endswith('_blanked.csv')))]
     
     #----- make the index and column names for result_df -----
     result_df = make_empty_result_df(data_list, sample_sheet, blank=True)
@@ -403,13 +461,16 @@ def fit_all_manual_blank(datadir:str, sample_sheet_file:str, result_file:str='uv
         else:
             blank_fn = data_list[result_df.index.to_list().index(blank_str)]
             blank_dict[blank_str] = read_curve(blank_fn)
+            # QC blank curvel
+            if not qc_blank_curve(blank_dict[blank_str]):
+                blank_dict[blank_str] = np.nan # throw affected curves away
             
     #----- fit curves -----
     for fn in tqdm(data_list):
         curve_name = parse_curve_name(fn)
         row = query_curve_in_df(sample_sheet, curve_name)
 
-        if len(row) == 0 or (curve_name['curve_str'] in all_blanks):
+        if len(row) == 0 or (curve_name['curve_str'] in all_blanks) or (not row['Usable'].values[0]):
             continue
         else:
             try:
@@ -528,7 +589,8 @@ def agg_fit_result(uvmelt_result_file, agg_result_file, sample_sheet_file,
     else:
         result_df = pd.read_csv(uvmelt_result_file, index_col=0)
         result_df['pass_qc'] = result_df.eval(single_curve_qc_criteria)
-        sns.scatterplot(data=result_df.query('dH_std < 1e2 & Tm_std < 50'), x='dH_std', y='Tm_std', hue='pass_qc')
+        result_df = result_df.query('pass_qc')
+        sns.scatterplot(data=result_df.query('dH_std < 1e2 & Tm_std < 50 & dH < 0'), x='dH_std', y='Tm_std', hue='pass_qc')
             
     if only_use_cooling:
         result_df['isCooling'] = result_df.curve_name.apply(lambda x: 'Cooling' in x)

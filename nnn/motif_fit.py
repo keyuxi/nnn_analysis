@@ -113,7 +113,7 @@ def get_feature_count_matrix(df, feature_method='get_stack_feature_list', **kwar
         df['feature_list'] = df.apply((lambda row: getattr(feature_list, feature_method)(row, **kwargs)), axis=1)
         cv = CountVectorizer(token_pattern=r"\b[ATCGNxy().+_]+\s", lowercase=False)
         feats = pd.DataFrame.sparse.from_spmatrix(cv.fit_transform([' '.join(x)+' ' for x in df['feature_list']]),
-                        index=df.index, columns=[x.strip() for x in cv.get_feature_names()])
+                        index=df.index, columns=[x.strip() for x in cv.get_feature_names_out()])
 
         # Remove features that every construct contains and is not intercept
         for k in feats.keys():
