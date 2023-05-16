@@ -121,6 +121,16 @@ def read_ml_data(datadir, append_2_arr=False):
         
     return arr, data_split_dict
     
+def read_json(fn):
+    with open(fn, 'r') as fh:
+        json_dict = json.load(fh)
+    return json_dict
+
+def write_json(object, fn):
+    with open(fn, 'w') as fh:
+        json.dump(object, fh, indent=4)
+
+    
 def read_pickle(fn):
     with open(fn, 'rb') as fh:
         pickle_dict = pickle.load(fh)

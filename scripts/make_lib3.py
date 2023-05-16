@@ -208,6 +208,18 @@ def def_3mer_mismatches(filter_3_mismatches=False):
                         var_stack.append([p1, p2, p3])
 
     return var_stack
+    
+def def_triloops():
+    var_loop = []
+    nts = ['A', 'T', 'C', 'G']
+    
+    for p1 in nts:
+        for p2 in nts:
+            for p3 in nts:
+                var_loop.append(p1+p2+p3)
+                
+    return var_loop
+    
 
 ##### MAKE VARIANTS #####
 

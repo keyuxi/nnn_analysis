@@ -204,6 +204,103 @@ def get_feature_list(row, stack_size:int=2, sep_base_stack:bool=False,
         return loops_cleaned + stacks_cleaned + ['intercept']
     else:
         return loops_cleaned + stacks_cleaned
+
+
+def get_nupack_feature_list(row, fit_intercept:bool=False):
+    """
+    Parameterize the hairpins according to NUPACK parameters.
+    Use NUPACK parameter terminologies in the parameter names.
+    05/16/2023 Yuxi
+    Args:
+    """        
+    sep = '#'
+    hairpin_pattern = re.compile(r'^\([.]+\)') # hairpin pattern
+    loop_base_size = 1
+    stack_size = 2
+    pad = stack_size - 1
+    seq = 'x'*pad+row['RefSeq']+'y'*pad
+    struct = '('*pad+row['TargetStruct']+')'*pad # has one more terminal stack at the end
+    feature_list = []
+
+    loops = LoopExtruder(seq, struct, neighbor_bps=loop_base_size)
+    stacks = StackExtruder(seq, struct, stack_size=stack_size)
+    
+    for loop in loops:
+        seq, struct = loop.split(',')
+        
+        """ hairpin loops """
+        if hairpin_pattern.match(struct):
+            hairpin_size = len(seq) - 2
+            feature_list.append('hairpin_size%s%d' % (sep, hairpin_size))
+            
+            if hairpin_size == 3:
+                terminal_bp = seq[-1] + seq[0]
+                feature_list.append('hairpin_triloop%s%s' % (sep, seq))
+                feature_list.append('terminal_penalty%s%s' % (sep, terminal_bp))
+            elif hairpin_size == 4:
+                feature_list.append('hairpin_tetraloop%s%s' % (sep, seq))
+            elif hairpin_size > 4:
+                hairpin_mismatch = seq[-2:] + seq[:2]
+                feature_list.append('hairpin_mismatch%s%s' % (sep, hairpin_mismatch))
+            else:
+                pass
+                                
+        else:
+            """ internal loops """
+            seq1, seq2 = seq.split(' ')
+            n1 = len(seq1) - 2
+            n2 = len(seq2) - 2
+        
+            if ((n1 == 0) or (n2 == 0)) and (n1 + n2 != 0):
+                """ bulges """
+                bulge_size = max(n1, n2)
+                feature_list.append('bulge_size%s%d' % (sep, bulge_size))
+                
+                if bulge_size == 1:
+                    stack = seq1[0] + seq1[-1] + seq2[0] + seq2[-1]
+                    feature_list.append('stack%s%s' % (sep, stack))
+                else:
+                    pair1 = seq1[0] + seq2[-1]
+                    pair2 = seq2[0] + seq1[-1]
+                    feature_list.append('terminal_penalty%s%s' % (sep, pair1))
+                    feature_list.append('terminal_penalty%s%s' % (sep, pair2))
+                
+            else:
+                """ mismatches """
+                interior_size = n1 + n2
+                feature_list.append('interior_size%s%d' % (sep, interior_size))
+                # no asymmetric constructs in the library
+                # therefore ignoring the interior assymm parameter
+                mm1 = seq2[-2:] + seq1[:2]
+                mm2 = seq1[-2:] + seq2[:2]
+                
+                if interior_size == 2:
+                    """ 1x1 mismatch """
+                    feature_list.append('interior_mismatch%s%s' % (sep, mm1))
+                    feature_list.append('interior_mismatch%s%s' % (sep, mm2))
+                elif interior_size > 2:
+                    """ 2x2 mismatch """
+                    feature_list.append('terminal_mismatch%s%s' % (sep, mm1))
+                    feature_list.append('terminal_mismatch%s%s' % (sep, mm2))
+                
+            
+    for stack in stacks:
+        seq, struct = stack.split(',')
+        if 'x' in seq or 'y' in seq:
+            """ terminal stack """
+            terminal_bp = seq[1] + seq[3]
+            feature_list.append('terminal_penalty%s%s' % (sep, terminal_bp))
+        else:
+            """ stack """
+            stack = seq.replace(' ', '')
+            feature_list.append('stack%s%s' % (sep, stack))
+                
+    
+    if fit_intercept:
+        return feature_list + ['intercept']
+    else:
+        return feature_list
+        
         
 def get_stem_nn_feature_list(row):
     dup_row = util.get_duplex_row(row)

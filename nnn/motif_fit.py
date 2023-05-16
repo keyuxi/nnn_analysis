@@ -102,16 +102,24 @@ def solve_linear_regression(X, y, y_err, singular_value_rel_thresh=1e-15,
  
 
 
-def get_feature_count_matrix(df, feature_method='get_stack_feature_list', **kwargs):
+def get_feature_count_matrix(df, feature_method='get_stack_feature_list', feature_style='nnn', **kwargs):
         """
         Args:
             df - (n_variant, N) df
+            feature_style - str, {'nnn', 'nupack'}, default to nnn.
+                Determines token pattern for regex
             **kwargs - passed to `feature_method`
         Returns:
             feats - a (n_variant, n_feature) feature df
         """
         df['feature_list'] = df.apply((lambda row: getattr(feature_list, feature_method)(row, **kwargs)), axis=1)
-        cv = CountVectorizer(token_pattern=r"\b[ATCGNxy().+_]+\s", lowercase=False)
+        
+        if feature_style == 'nnn':
+            token_pattern = r"\b[ATCGNxy().+_]+\s"
+        elif feature_style == 'nupack':
+            token_pattern = r"\b[a-z_]+\#[0-9ATCG]+\s"
+
+        cv = CountVectorizer(token_pattern=token_pattern, lowercase=False)
         feats = pd.DataFrame.sparse.from_spmatrix(cv.fit_transform([' '.join(x)+' ' for x in df['feature_list']]),
                         index=df.index, columns=[x.strip() for x in cv.get_feature_names_out()])
 

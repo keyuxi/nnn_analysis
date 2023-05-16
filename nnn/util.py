@@ -95,6 +95,9 @@ def get_Na_adjusted_Tm(Tm, dH, GC, Na=0.088, from_Na=1.0):
 def get_dG(dH, Tm, celsius):
     return dH * (1 - (273.15 + celsius) / (273.15 + Tm))
     
+def get_Tm(dH, dG, celsius=37):
+    return (273.15 + celsius) / (1 - dG / dH) - 273.15
+
 def get_dS(dH, Tm):
     return dH / (Tm + 273.15)
     
@@ -124,6 +127,16 @@ def get_Na_adjusted_dG(Tm, dH, GC, celsius, Na=0.088, from_Na=1.0):
 def get_Na_adjusted_dG_37(Tm, dH, GC, Na=0.088, from_Na=1.0):
     Tm_adjusted = get_Na_adjusted_Tm(Tm, dH, GC, Na, from_Na)
     return get_dG(dH, Tm_adjusted, 37)
+
+def get_Na_adjusted_param(Na=1.0, from_Na=0.088, **data_dict):
+    """
+    data_dict - dict, with keys dH, Tm, and seq
+    """
+    dH, Tm = data_dict['dH'], data_dict['Tm']
+    GC_content = get_GC_content(data_dict['seq'])
+    Tm_adjusted = get_Na_adjusted_Tm(Tm, dH, GC_content, Na, from_Na)
+    dG_37_adjusted = get_dG(dH, Tm_adjusted, 37)
+    return dict(dH=dH, dS=dH/Tm_adjusted, Tm=Tm_adjusted, dG_37=dG_37_adjusted)
     
 def get_dof(row):
     n_T = len(np.arange(20, 62.5, 2.5))
@@ -309,7 +322,7 @@ def get_seq_end_pair_prob(seq:str, celsius:float, sodium=1.0, n_pair:int=2, para
         raise ValueError("n_pair value not allowed")
 
 
-def get_nupack_dH_dS_Tm_dG_37(seq, struct, sodium=1.0, **kwargs):
+def get_nupack_dH_dS_Tm_dG_37(seq, struct, sodium=1.0, return_dict=False, **kwargs):
     '''
     Return dH (kcal/mol), dS(kcal/mol), Tm (˚C), dG_37(kcal/mol)
     Use the better sodium correction equation
@@ -335,8 +348,10 @@ def get_nupack_dH_dS_Tm_dG_37(seq, struct, sodium=1.0, **kwargs):
         dS = dH / (Tm + 273.15)
     else:
         Tm = np.nan
-    
-    return dH, dS, Tm, dG_37
+    if return_dict:
+        return dict(dH=dH, dS=dS, Tm=Tm, dG_37=dG_37)
+    else:
+        return [dH, dS, Tm, dG_37]
 
 
 

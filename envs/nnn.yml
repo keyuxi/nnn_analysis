@@ -31,3 +31,4 @@ dependencies:
     - python-louvain
     - sympy
     - hampel
+    - levenshtein
