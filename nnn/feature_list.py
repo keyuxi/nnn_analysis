@@ -143,13 +143,14 @@ def get_hairpin_loop_feature_list(row, stack_size=2, loop_base_size=0,
     return feature_list
     
     
-def get_feature_list(row, stack_size:int=2, sep_base_stack:bool=False,
+def get_feature_list(row, stack_size:int=2, sep_base_stack:bool=False, hairpin_mm:bool=False,
                      fit_intercept:bool=False, symmetry:bool=False, ignore_base_stack:bool=False):
     """
     Keep dot bracket in the feature to account for bulges and mismatches etc.
     Args:
         loop_base_size - int, #stacks at the base of the loop to consider. Fixed to 1
         sep_base_stack - bool, whether to separate base stack of hairpin loops to save parameters
+        hairpin_mm - bool, if True, add hairpin mismatch parameters
         symmetry - bool, if set to True, view 2 symmetric motifs as the same
     """
     def clean(x):
@@ -181,6 +182,9 @@ def get_feature_list(row, stack_size:int=2, sep_base_stack:bool=False,
                                    
                 if not ignore_base_stack:
                     loops_cleaned.append(clean(hairpin_stack))
+                    
+                if hairpin_mm:
+                    loops_cleaned.append('%s%s+%s%s_(.+.)' % (seq[0], seq[1], seq[-2], seq[-1]))
                     
             elif struct == '(..(+)..)':
                 mm = f'{seq[1:3]}+{seq[6:8]}_..+..'
@@ -280,8 +284,10 @@ def get_nupack_feature_list(row, fit_intercept:bool=False):
                     feature_list.append('interior_mismatch%s%s' % (sep, mm2))
                 elif interior_size > 2:
                     """ 2x2 mismatch """
-                    feature_list.append('terminal_mismatch%s%s' % (sep, mm1))
-                    feature_list.append('terminal_mismatch%s%s' % (sep, mm2))
+                    feature_list.append('interior_mismatch%s%s' % (sep, mm1))
+                    feature_list.append('interior_mismatch%s%s' % (sep, mm2))
+                    # feature_list.append('terminal_mismatch%s%s' % (sep, mm1))
+                    # feature_list.append('terminal_mismatch%s%s' % (sep, mm2))
                 
             
     for stack in stacks:

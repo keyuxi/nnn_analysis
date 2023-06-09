@@ -271,14 +271,25 @@ def get_X_y(arr, split_dict, param, feats=None, split='train'):
     return dict(X=X, y=y, y_err=y_err, feature_names=feats.columns.tolist(), param=param, split=split)
     
     
-def fit_param(arr, data_split_dict, param, feats, ax, mode='val'):
+def fit_param(arr, data_split_dict, param, feats, ax, mode='val',
+              fix_some_coef=False, **fix_coef_args):
+    """
+    Calls lr.fit() if not fix_some_coef, otherwise calls lr.fit_with_some_coef_fixed()
+    Args:
+        **fix_coef_args - fixed_feature_names, coef_df are required
+    """
     color_dict = dict(dH='c', Tm='cornflowerblue', dG_37='teal', dS='steelblue')
     train_data = get_X_y(arr, data_split_dict, param=param, feats=feats, split='train')
     val_data = get_X_y(arr, data_split_dict, param=param, feats=feats, split=mode)
     
     lr = LinearRegressionSVD()
-    lr.fit(train_data['X'], train_data['y'], train_data['y_err'], feature_names=train_data['feature_names'],
-           skip_rank=False)
+    if not fix_some_coef:
+        lr.fit(train_data['X'], train_data['y'], train_data['y_err'], feature_names=train_data['feature_names'],
+            skip_rank=False)
+    else:
+        lr.fit_with_some_coef_fixed(train_data['X'], train_data['y'], train_data['y_err'], feature_names=train_data['feature_names'],
+            **fix_coef_args)
+        
     
     plotting.plot_truth_predict(lr, val_data, ax=ax, title='NNN OLS model',
                             color=color_dict[param], alpha=.05)

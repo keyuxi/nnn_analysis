@@ -8,6 +8,7 @@ from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
 import seaborn as sns
 import colorcet as cc
 import json, os, pickle
+from collections import defaultdict
 from RiboGraphViz import RGV
 from RiboGraphViz import LoopExtruder, StackExtruder
 from ipynb.draw import draw_struct
@@ -16,7 +17,7 @@ import sklearn
 from scipy.stats import pearsonr
 from sklearn.metrics import r2_score
 
-from nnn import util, fileio, processing, plotting, simulation, dG_fit, uv
+from nnn import util, fileio, processing, plotting, simulation, dG_fit, uv, mupack
 import nnn.motif_fit as mf
 from nnn.arraydata import ArrayData
 

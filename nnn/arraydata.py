@@ -43,6 +43,7 @@ class ArrayData(object):
         curve - dict of pd.DataFrame, keys are replicate,
                 levels are variant-replicate-median/se-temperature. 
                 Green normed data.
+        celsius - dict of array, temperatures for the curves of each replicate.
         annotation - pd.DataFrame, designed library
         replicate_df - pd.Dataframe with the information of replicate locations
                      No actual data is loaded
@@ -85,6 +86,11 @@ class ArrayData(object):
         else:
             self.data_all, self.curve, self.curve_se = self.read_data_single()
 
+        # celsius
+        self.celsius = dict()
+        for rep in self.curve:
+            self.celsius[rep] = np.array([float(x.split('_')[1]) for x in self.curve[rep].columns])
+        
         # data accounting for num variant per series after each step of processing
         steps = ['designed', 'fitted', 'passed2state']
         series = np.unique(self.annotation.Series)

@@ -67,6 +67,9 @@ def absolute_file_paths(directory):
 
 def rcompliment(seq):
     return "".join(complement.get(base, base) for base in reversed(seq))
+
+def nrcompliment(seq):
+    return "".join(complement.get(base, base) for base in seq)
             
 def convert_santalucia_motif_representation(motif):
     strand = motif.split('_')

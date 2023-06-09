@@ -38,7 +38,7 @@ def calc_kde_pdf(data):
 
 def plot_colored_scatter_comparison(data, x, y, 
                                     palette='plasma', alpha=1, ax=None, lim=None, 
-                                    rasterized=True, show_cbar=True,**kwargs):
+                                    rasterized=True, show_cbar=True, color_by_density=True, **kwargs):
     if ax is None:
         fig, ax = plt.subplots(figsize=(6,5))
 
@@ -48,15 +48,23 @@ def plot_colored_scatter_comparison(data, x, y,
         ax.set_ylim(lim)
 
     df = data.copy()
-    df['density'] = calc_kde_pdf(data[[x,y]])
-    # df['size'] = 200#100 / data[x]**2
-    hue_norm = (0 * np.max(df.density), 1 * np.max(df.density))
     
-    norm = plt.Normalize(hue_norm[0], hue_norm[1])
-    sm = plt.cm.ScalarMappable(cmap=palette, norm=norm)
-    sm.set_array([])
-    sns.scatterplot(data=df, x=x, y=y, hue='density', size=.1, hue_norm=hue_norm,
-                    palette=palette, alpha=alpha, legend=False, ax=ax, rasterized=rasterized, **kwargs)
+    if color_by_density:
+        df['density'] = calc_kde_pdf(data[[x,y]])
+        # df['size'] = 200#100 / data[x]**2
+        hue_norm = (0 * np.max(df.density), 1 * np.max(df.density))
+        
+        norm = plt.Normalize(hue_norm[0], hue_norm[1])
+        sm = plt.cm.ScalarMappable(cmap=palette, norm=norm)
+        sm.set_array([])
+        sns.scatterplot(data=df, x=x, y=y, hue='density', size=.1, hue_norm=hue_norm,
+                        palette=palette, alpha=alpha, legend=False, ax=ax, rasterized=rasterized, **kwargs)
+    else:
+        show_cbar = False
+        sns.scatterplot(data=df, x=x, y=y, size=.1,
+                        palette=palette, alpha=alpha, legend=False, ax=ax, rasterized=rasterized, **kwargs)
+        
+        
     sns.despine()
     if show_cbar:
         cbar = plt.colorbar(sm)
