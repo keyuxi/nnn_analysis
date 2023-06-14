@@ -325,6 +325,51 @@ def get_seq_end_pair_prob(seq:str, celsius:float, sodium=1.0, n_pair:int=2, para
         raise ValueError("n_pair value not allowed")
 
 
+def calculate_unpaired_fraction(seq, DNA_conc, model):
+    '''Calculate unpaired fraction either using structure free energies'''
+
+    A = nupack.Strand(seq, name='A')
+
+    duplex = '(' * A.nt() + '+' + ')' * A.nt()
+    unpaired = '.' * A.nt() + '+' + '.' * A.nt()
+
+    # secondary structure free energies
+    energies = [nupack.structure_energy([A, ~A], s, model=model) for s in (unpaired, duplex)]
+
+    # get Boltzmann factor including the concentration of the strand species, assuming ideal solution
+    factor = np.exp(-model.beta * (energies[1] - energies[0])) * DNA_conc / nupack.constants.water_molarity(model.temperature)
+
+    # structure free energies are assuming distinguishable strands, so if homodimer need to divide by 2 for indistinguishability
+    if str(A) == str(~A):
+        factor /= 2
+
+    return 1 / (1 + factor) # to get fraction in the unpaired state
+
+    
+def calculate_tm(seq, sodium, DNA_conc, param_set):
+    '''Simple Tm calculation using bisection to find where unpaired = paired population'''
+
+    lo, hi = 0, 100
+    get_nupack_model = lambda T: nupack.Model(material=param_set, celsius=T, sodium=sodium)
+
+    if calculate_unpaired_fraction(seq, DNA_conc, get_nupack_model(lo)) > 0.5:
+        return lo
+
+    if calculate_unpaired_fraction(seq, DNA_conc, get_nupack_model(hi)) < 0.5:
+        return hi
+
+    while True:
+        T = (lo + hi) / 2
+        unpaired = calculate_unpaired_fraction(seq, DNA_conc, get_nupack_model(T))
+
+        if abs(unpaired - 0.5) < 1e-5:
+            return T
+        elif unpaired > 0.5:
+            hi = T
+        else:
+            lo = T
+            
+
 def get_nupack_dH_dS_Tm_dG_37(seq, struct, sodium=1.0, return_dict=False, **kwargs):
     '''
     Return dH (kcal/mol), dS(kcal/mol), Tm (˚C), dG_37(kcal/mol)
@@ -344,7 +389,13 @@ def get_nupack_dH_dS_Tm_dG_37(seq, struct, sodium=1.0, return_dict=False, **kwar
     dH = dG_1 + dS*(T1+273.15)
     
     if dS != 0:
-        Tm = (dH/dS) - 273.15 # to convert to ˚C
+        if not '+' in struct:
+            Tm = (dH/dS) - 273.15 # to convert to ˚C
+        else:
+            # duplex
+            # kwargs: DNA_conc, param_set
+            Tm = calculate_tm(seq, sodium=sodium, **kwargs)
+            
         Tm = get_Na_adjusted_Tm(Tm=Tm, dH=dH, GC=get_GC_content(seq), 
                                     Na=sodium, from_Na=1.0)
         dG_37 = get_dG(Tm=Tm, dH=dH, celsius=37)

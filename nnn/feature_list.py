@@ -173,25 +173,28 @@ def get_feature_list(row, stack_size:int=2, sep_base_stack:bool=False, hairpin_m
             if pattern.match(struct):
                 hairpin_loop = LoopExtruder(seq, struct, neighbor_bps=0)[0]
                 hairpin_stack = StackExtruder(seq, struct, stack_size=1)[0]
-                loops_cleaned.remove(loop)
                 
                 if len(seq) <= 6:
                     loops_cleaned.append(clean(hairpin_loop))
                 else:
                     loops_cleaned.append('NNNNN_.....')
                                    
+                if hairpin_mm:
+                    loops_cleaned.append('%s%s+%s%s_(.+.)' % (seq[0], seq[1], seq[-2], seq[-1]))
+                    ignore_base_stack = True
+                    
                 if not ignore_base_stack:
                     loops_cleaned.append(clean(hairpin_stack))
                     
-                if hairpin_mm:
-                    loops_cleaned.append('%s%s+%s%s_(.+.)' % (seq[0], seq[1], seq[-2], seq[-1]))
+                
+                loops_cleaned.remove(loop)
                     
             elif struct == '(..(+)..)':
                 mm = f'{seq[1:3]}+{seq[6:8]}_..+..'
                 mm_stack = f'{seq[0]}+{seq[3]}+{seq[5]}+{seq[8]}_(+(+)+)'
-                loops_cleaned.remove(loop)
                 loops_cleaned.append(mm)
                 loops_cleaned.append(mm_stack)
+                loops_cleaned.remove(loop)
                 
     if symmetry:
         stacks = [sort_stack_full(x, sep='+') for x in stacks_cleaned]
@@ -202,12 +205,15 @@ def get_feature_list(row, stack_size:int=2, sep_base_stack:bool=False, hairpin_m
             if pattern.match(struct):
                 loops_cleaned.remove(loop)
                 loops_cleaned.append('NNNNN_.....')
-                
+    
+    feature_list = loops_cleaned + stacks_cleaned
+    # throw away features without sequence
+    feature_list = [x for x in feature_list if '_' in x]   
     
     if fit_intercept:
-        return loops_cleaned + stacks_cleaned + ['intercept']
+        return feature_list + ['intercept']
     else:
-        return loops_cleaned + stacks_cleaned
+        return feature_list
 
 
 def get_nupack_feature_list(row, fit_intercept:bool=False):

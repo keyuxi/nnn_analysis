@@ -115,7 +115,8 @@ def get_feature_count_matrix(df, feature_method='get_stack_feature_list', featur
         df['feature_list'] = df.apply((lambda row: getattr(feature_list, feature_method)(row, **kwargs)), axis=1)
         
         if feature_style == 'nnn':
-            token_pattern = r"\b[ATCGNxy().+_]+\s"
+            # token_pattern = r"\b[ATCGNxy().+_]+\s"
+            token_pattern = r"\b[a-zA-Z().+_]+\s"
         elif feature_style == 'nupack':
             token_pattern = r"\b[a-z_]+\#[0-9ATCG]+\s"
 
