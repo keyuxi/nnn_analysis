@@ -122,6 +122,30 @@ def combine_replicates(reps, rep_names,
 
     return df
 
+def combine_replicate_p_unfold(p_unfold_dict, celsius_dict):
+    """
+    !!! Only works when only one rep has missing temperature condition
+    !!! Not weighted by error
+    """
+    # find the rep with missing celsius data
+    n_celsius = [len(value) for value in celsius_dict.values()]
+    idmin, idmax = np.argmin(n_celsius), np.argmax(n_celsius)
+    repmin, repmax = list(celsius_dict.keys())[idmin], list(celsius_dict.keys())[idmax]
+    celsius_list = celsius_dict[repmax]
+    missing_celsius = set(celsius_dict[repmax]) - set(celsius_dict[repmin])
+    p_unfold_dict[repmin][['%s_%.1f'%(repmin, x) for x in missing_celsius]] = np.nan
+
+    for i, rep_name in enumerate(p_unfold_dict):
+        if i == 0:
+            df = p_unfold_dict[rep_name][['%s_%.1f'%(rep_name, x) for x in celsius_list]]
+        else:
+            df = df.join(p_unfold_dict[rep_name][['%s_%.1f'%(rep_name, x) for x in celsius_list]], how='outer')
+            
+    p_unfold = np.nanmean(
+        df.values.reshape(-1, 3,len(celsius_dict[repmax])),
+        axis=1)
+    return pd.DataFrame(data=p_unfold, columns=celsius_list, index=df.index)
+    
 
 def correct_interexperiment_error(r1, r2, plot=True, figdir=None, return_debug=False):
     """

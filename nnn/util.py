@@ -58,6 +58,21 @@ def save_multi_image(filename, figs=None):
     for fig in figs:
         fig.savefig(pp, format='pdf')
     pp.close()
+    
+def set_size(w,h, ax=None):
+    """ 
+    Use to set ax size. will auto get current axis
+    w, h: width, height in inches 
+    """
+    if not ax: ax=plt.gca()
+    l = ax.figure.subplotpars.left
+    r = ax.figure.subplotpars.right
+    t = ax.figure.subplotpars.top
+    b = ax.figure.subplotpars.bottom
+    figw = float(w)/(r-l)
+    figh = float(h)/(t-b)
+    ax.figure.set_size_inches(figw, figh)
+    
 
 def absolute_file_paths(directory):
     for dirpath,_,filenames in os.walk(directory):

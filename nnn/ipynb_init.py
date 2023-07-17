@@ -17,7 +17,7 @@ import sklearn
 from scipy.stats import pearsonr
 from sklearn.metrics import r2_score
 
-from nnn import util, fileio, processing, plotting, simulation, dG_fit, uv, mupack
+from nnn import util, fileio, processing, plotting, simulation, dG_fit, uv, mupack, modeling
 import nnn.motif_fit as mf
 from nnn.arraydata import ArrayData
 

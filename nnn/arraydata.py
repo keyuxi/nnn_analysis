@@ -43,6 +43,7 @@ class ArrayData(object):
         curve - dict of pd.DataFrame, keys are replicate,
                 levels are variant-replicate-median/se-temperature. 
                 Green normed data.
+        p_unfold - pd.DataFrame, normalized to p_unfold and combined across reps.
         celsius - dict of array, temperatures for the curves of each replicate.
         annotation - pd.DataFrame, designed library
         replicate_df - pd.Dataframe with the information of replicate locations
@@ -82,14 +83,15 @@ class ArrayData(object):
         
         # load data
         if self.n_rep > 1:
-            self.data_all, self.curve, self.curve_se = self.read_data()
+            self.data_all, self.curve, self.curve_se, self.p_unfold = self.read_data()
         else:
-            self.data_all, self.curve, self.curve_se = self.read_data_single()
+            self.data_all, self.curve, self.curve_se, self.p_unfold = self.read_data_single()
 
         # celsius
-        self.celsius = dict()
-        for rep in self.curve:
-            self.celsius[rep] = np.array([float(x.split('_')[1]) for x in self.curve[rep].columns])
+        if not hasattr(self, 'celsius'):
+            self.celsius = dict()
+            for rep in self.curve:
+                self.celsius[rep] = np.array([float(x.split('_')[1]) for x in self.curve[rep].columns])
         
         # data accounting for num variant per series after each step of processing
         steps = ['designed', 'fitted', 'passed2state']
@@ -110,7 +112,12 @@ class ArrayData(object):
 
         self.data = self.data_all[[c for c in self.data_all.columns if not ('-' in c)]]
 
-
+    @staticmethod
+    def calc_p_unfold(rep_name, rep, cond):
+        cols = ['%s_%.1f'%(rep_name, float(x.split('_')[1])) for x in cond]
+        melt_curve = (rep[cond].values - rep.fmin.values.reshape(-1,1)) / (rep.fmax - rep.fmin).values.reshape(-1,1)
+        melt_curve = np.clip(melt_curve, a_min=0, a_max=1)
+        return pd.DataFrame(data=melt_curve, index=rep.index, columns=cols)
 
     def read_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         
@@ -129,7 +136,15 @@ class ArrayData(object):
         curves = {rep_name: rep[cond] for rep, rep_name, cond in zip(reps, self.replicate_df['name'], conds)}
         curves_se = {rep_name: rep[[c+'_std' for c in cond]].rename(columns=lambda c: c.replace("_std", "_se")) / np.sqrt(rep['n_clusters']).values.reshape(-1,1)
             for rep, rep_name, cond in zip(reps, self.replicate_df['name'], conds)}
-        return data, curves, curves_se
+        
+        self.celsius = dict()
+        for rep in curves:
+            self.celsius[rep] = np.array([float(x.split('_')[1]) for x in curves[rep].columns])
+
+        p_unfold_dict = {rep_name: self.calc_p_unfold(rep_name, rep, cond) for rep, rep_name, cond in zip(reps, self.replicate_df['name'], conds)}
+        p_unfold = processing.combine_replicate_p_unfold(p_unfold_dict, self.celsius)
+        return data, curves, curves_se, p_unfold
+        
 
     def read_data_single(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         
@@ -144,7 +159,8 @@ class ArrayData(object):
         data = processing.combine_replicates([rep], self.replicate_df['name'], verbose=False)
         curves = {self.replicate_df['name']: rep[cond]}
         curves_se = {self.replicate_df['name']: rep[[c+'_std' for c in cond]].rename(columns=lambda c: c.replace("_std", "_se")) / np.sqrt(rep['n_clusters']).values.reshape(-1,1)}
-        return data, curves, curves_se
+        p_unfold = {self.replicate_df['name']: self.calc_p_unfold(self.replicate_df['name'], rep, cond)}
+        return data, curves, curves_se, p_unfold
 
 
     def get_replicate_data(self, replicate_name: str, attach_annotation: bool = False, verbose=True) -> pd.DataFrame:

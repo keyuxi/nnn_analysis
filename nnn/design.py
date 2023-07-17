@@ -62,7 +62,7 @@ def parse_nupack_result(my_result):
     with open('./tmp/tmp.txt', 'r') as fh:
         lines = fh.readlines()
         
-    strands = [line[9:-1].replace(' ','') for line in lines if line.startswith('strand ')]
+    strands = [line.strip()[9:-1].replace(' ','') for line in lines if line.strip().startswith('strand ')]
     return strands
     
     
