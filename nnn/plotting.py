@@ -6,6 +6,9 @@ import seaborn as sns
 from scipy.stats import chi2, pearsonr, norm
 # from sklearn.metrics import r2_score
 from ipynb.draw import draw_struct
+import matplotlib.patches as patches
+from matplotlib.path import Path
+import matplotlib.cm as cm
 
 from .util import *
 from . import util
@@ -566,4 +569,70 @@ def plot_truth_predict(lr:LinearRegressionSVD,
     
     sns.despine()
     return ax
+
+
+def plot_connected_dot(subset_data, width:float=0.2, ax=None):
+    """
+    Connected dot plot to show subsets
+    Args:
+        subset_data - List[List[List[int]]]
+        width - how far those in the same group are dispersed
+    """
+    plt.rcParams["axes.prop_cycle"] = util.get_cycle("Dark2")
+    
+    if ax is None:
+        _,ax = plt.subplots(figsize=(5,3))
+        
+    # Add the connected dot plot
+    for idx, subsets in enumerate(subset_data):
+        offset = np.linspace(-width,width,len(subsets))
+        for i, subset_points in enumerate(subsets):
+            y_positions = np.array([idx + offset[i]] * len(subset_points))
+            ax.plot(subset_points, y_positions, 
+                    marker='o', linestyle='-', linewidth=8, markersize=8, alpha=0.3
+                    )
+            
+            
+def plot_arc_diagram(nodes, edges, edge_weights=None, edge_width_factor=1, ax=None):
+    
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 5))
+    
+    # Position the nodes along the x axis
+    node_positions = {node: i for i, node in enumerate(nodes)}
+    
+    # Plot the nodes
+    nodes_y = .5
+    for node in nodes:
+        ax.plot(node_positions[node], nodes_y, 'o', color='blue', markersize=10)
+        ax.text(node_positions[node], nodes_y - 0.2, node, ha='center', va='top')
+    
+    if edge_weights is None:
+        edge_weights = np.ones(len(edges))
+    
+    edge_weights = edge_width_factor * np.array(edge_weights)
+    
+    # Draw arcs for each edge
+    for i,edge in enumerate(edges):
+        start, end = edge
+        start_pos, end_pos = node_positions[start], node_positions[end]
+        
+        # Use a Bezier curve for the arc for more control
+        verts = [
+            (start_pos, nodes_y),  # P0
+            ((start_pos + end_pos) / 2, abs(start_pos - end_pos) / 3),  # P1
+            (end_pos, nodes_y),  # P2
+        ]
+
+        codes = [Path.MOVETO, Path.CURVE3, Path.CURVE3]
+        
+        path = Path(verts, codes)
+        patch = patches.PathPatch(path, facecolor='none', 
+                                  lw=edge_weights[i], edgecolor='k', alpha=.1)
+        ax.add_patch(patch)
+    
+    # Set axis properties
+    ax.set_ylim(bottom=-.5) # avoid cropping out the node circles at the edge
+    ax.set_aspect('equal')
+    ax.axis('off')
 

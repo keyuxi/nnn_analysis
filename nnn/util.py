@@ -15,8 +15,10 @@ import seaborn as sns
 sns.set_style('ticks')
 sns.set_context('paper')
 #import colorcet as cc
+from matplotlib.pyplot import cycler
+from matplotlib.colors import LinearSegmentedColormap, ListedColormap
+import matplotlib.cm
 from scipy.stats import chi2, pearsonr, norm
-# from sklearn.metrics import r2_score
 # from lmfit.models import PowerLawModel
 from ipynb.draw import draw_struct
 import nupack
@@ -37,6 +39,9 @@ palette=[
 
 complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', '-':'-'}
 
+####################
+##### Plotting #####
+####################
 
 def save_fig(filename, fig=None):
 
@@ -74,17 +79,71 @@ def set_size(w,h, ax=None):
     ax.figure.set_size_inches(figw, figh)
     
 
+def get_cycle(cmap, N=None, use_index="auto"):
+    """
+    Make catagorical cmap work with plt.plot()
+    Usage:
+        plt.rcParams["axes.prop_cycle"] = get_cycle("Dark2")
+    """
+    if isinstance(cmap, str):
+        if use_index == "auto":
+            if cmap in ['Pastel1', 'Pastel2', 'Paired', 'Accent',
+                        'Dark2', 'Set1', 'Set2', 'Set3',
+                        'tab10', 'tab20', 'tab20b', 'tab20c']:
+                use_index=True
+            else:
+                use_index=False
+        cmap = matplotlib.cm.get_cmap(cmap)
+    if not N:
+        N = cmap.N
+    if use_index=="auto":
+        if cmap.N > 100:
+            use_index=False
+        elif isinstance(cmap, LinearSegmentedColormap):
+            use_index=False
+        elif isinstance(cmap, ListedColormap):
+            use_index=True
+    if use_index:
+        ind = np.arange(int(N)) % cmap.N
+        return cycler("color",cmap(ind))
+    else:
+        colors = cmap(np.linspace(0,1,N))
+        return cycler("color",colors)
+
+#################
+#### General ####
+#################
+
 def absolute_file_paths(directory):
     for dirpath,_,filenames in os.walk(directory):
         for f in filenames:
             yield os.path.abspath(os.path.join(dirpath, f))
             
-
+def swap_columns(df, col1, col2):
+    col_list = list(df.columns)
+    x, y = col_list.index(col1), col_list.index(col2)
+    col_list[y], col_list[x] = col_list[x], col_list[y]
+    df = df[col_list]
+    return df
+    
 def rcompliment(seq):
     return "".join(complement.get(base, base) for base in reversed(seq))
 
 def nrcompliment(seq):
     return "".join(complement.get(base, base) for base in seq)
+   
+def replace_at_index(s:str, newstring:str, idx:int, idy:int=np.nan):
+    """
+    Only replace at one location if idy is not given
+    """
+    if np.isnan(idy):
+        return s[:idx] + newstring + s[idx + 1:]
+    else:
+        return s[:idx] + newstring + s[idy:]
+   
+######################            
+#### NNN specific ####
+######################
             
 def convert_santalucia_motif_representation(motif):
     strand = motif.split('_')
@@ -447,7 +506,10 @@ class LinearRegressionSVD(LinearRegression):
                 
     def fit(self, X:np.array, y:np.array, y_err:np.array, sample_weight=None, 
             feature_names=None, singular_value_rel_thresh:float=1e-15, skip_rank:bool=False):
-
+        """
+        Params:
+            skip_rank - if True, do not calculate the rank of the matrix
+        """
         if sample_weight is not None:
             assert len(sample_weight) == len(y)
             y_err = 1 / sample_weight

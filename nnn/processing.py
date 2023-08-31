@@ -249,3 +249,46 @@ def correct_interexperiment_error(r1, r2, plot=True, figdir=None, return_debug=F
     else:
         return powerlaw_result.best_values['amplitude'], powerlaw_result.best_values['exponent']
 
+
+def get_variances(y, sigma, y_hat, 
+                  regress_sigma=False, sigma_model=None, return_model=False,
+                  verbose=True):
+    """
+    Args:
+        sigma_model - LinearRegression, if None fit afresh
+    """
+    n = len(y)
+
+    var = defaultdict()
+    var['tot'] = np.sum((y - np.mean(y))**2)/ n
+    var['model'] = np.sum((y_hat - np.mean(y_hat))**2) / n
+    
+    if regress_sigma:
+        if sigma_model is None:
+            model = LinearRegression()
+            model.fit(y.reshape(-1,1), sigma)
+        else:
+            model = sigma_model
+        
+        var['tech'] = np.sum((model.predict(y.reshape(-1,1)))**2) / n
+        
+        if verbose:
+            a = model.coef_[0]
+            b = model.intercept_
+            print('sigma = %.2fy + %.2f\n' % (a,b))
+            
+    else:
+        var['tech'] = np.sum(sigma**2) / n
+        
+    var['bio'] = var['tot'] - var['tech']
+    var['res'] = np.sum((y - y_hat)**2) / n
+    var['?'] = var['res'] - var['tech']
+    
+    if verbose:
+        print('\t'.join(var.keys()))
+        print('%.2f\t'*len(var) % tuple(var.values()))
+    
+    if return_model:
+        return var, model
+    else:
+        return var

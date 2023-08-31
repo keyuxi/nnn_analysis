@@ -265,7 +265,7 @@ def lr_dict_2_nupack_json(lr_dict:util.LinearRegressionSVD, template_file:str, o
 
 """ Plotting functions """
 
-def plot_mupack_nupack(data, x_suffix, param, lim, color_by_density=True):
+def plot_mupack_nupack(data, x_suffix, param, lim, color_by_density=False):
     fig, ax = plt.subplots(1,2,figsize=(4,2))
     kwargs = dict(show_cbar=False, lim=lim, color_by_density=color_by_density)
     plotting.plot_colored_scatter_comparison(data=data, x=param+x_suffix, y=param+'_MUPACK', 

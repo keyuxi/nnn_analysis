@@ -116,7 +116,7 @@ def get_feature_count_matrix(df, feature_method='get_stack_feature_list', featur
         
         if feature_style == 'nnn':
             # token_pattern = r"\b[ATCGNxy().+_]+\s"
-            token_pattern = r"\b[a-zA-Z().+_]+\s"
+            token_pattern = r"\b[a-zA-Z0-9().+_-]+\s"
         elif feature_style == 'nupack':
             token_pattern = r"\b[a-z_]+\#[0-9ATCG]+\s"
 
@@ -262,7 +262,7 @@ def get_X_y(arr, split_dict, param, feats=None, split='train'):
     if feats is not None:
         X = feats.loc[seqids, :].values
     else:    
-        feats = mf.get_feature_count_matrix(arr, feature_method='get_feature_list', 
+        feats = get_feature_count_matrix(arr, feature_method='get_feature_list', 
                                             fit_intercept=False, symmetry=False)
         X = feats.values
     df = arr.loc[seqids, :]

@@ -331,3 +331,48 @@ def get_stem_nn_feature_list(row):
         nn_list.append(nn)
         
     return nn_list
+    
+    
+def get_partial_position_feature_list(row, seq_type:str='hairpin_loop', **kwargs):
+    """
+    To see the contribution of different sequence components in figure 3
+    Args:
+        seq_type - {'hairpin_loop', 'internal_loop', 'single_mm'}
+        **kwargs - `seq_type` specific settings
+            `hairpin_loop':
+                loop_base_size - int
+                pos_list - List[int or List[int]]. e.g. loop_base_size = 2, 
+                    -2 is first base, 0 the first in the loop
+            `single_mm`:
+
+    """
+    def clean(x):
+        return x.replace(' ','+').replace(',', '_')
+
+    assert seq_type in {'hairpin_loop', 'internal_loop'}
+    feature_list = []
+    seq, struct = row.RefSeq, row.TargetStruct
+    
+    if seq_type == 'hairpin_loop':
+        loop_base_size = kwargs['loop_base_size']
+        pos_list = kwargs['pos_list']
+        
+        loops = LoopExtruder(seq, struct, neighbor_bps=loop_base_size)
+        loops = [clean(loop) for loop in loops]
+        
+        for loop in loops:
+            for pos in pos_list:
+                if isinstance(pos, int):
+                    feat = loop[pos+loop_base_size] + str(pos)
+                else:
+                    feat = ''.join([loop[p+loop_base_size] for p in pos])
+                    feat += ''.join([str(p) for p in pos])
+
+                feature_list.append(feat)
+    elif seq_type == 'single_mm':
+        idxmm = (('('+struct).find('((.(') + 1, (struct+')').find(').))') + 1) # Tuple[int, int]
+        pass 
+        # TODO
+        
+    return feature_list
+    

@@ -16,6 +16,7 @@ qual_palette = [
     (25,137,30),
     (38,44,107),
     (142,4,150),
+    (219,101,210),
     (131,164,255)]
 qual_palette = np.array(qual_palette) / 256
 
@@ -25,6 +26,8 @@ def clean(x, seq_only=False):
         return x.replace(' ', '+').split(',')[0]
     else:
         return x.replace(' ','+').replace(',', '_')
+        
+
     
 
 def get_element(row, seq_only=False):
@@ -40,13 +43,17 @@ def get_element(row, seq_only=False):
         element = clean_fun(stacks[stack_ind])
         
     elif row['Series'] == 'TETRAloop':
-        neighbor_bps = 1 if row.ConstructType == 'NN' else 2
-        element = clean_fun(LoopExtruder(row.RefSeq, row.TargetStruct, neighbor_bps=neighbor_bps)[0])    
+        neighbor_bps = 1 #if row.ConstructType == 'NN' else 2
+        element = clean_fun(LoopExtruder(row.RefSeq, row.TargetStruct, neighbor_bps=neighbor_bps)[0])
+        
+    elif row['Series'] in {'MisMatches', 'Bulges'}:
+        element = None
         
     return element
     
     
-def get_element_fingerprint(arr, scaffold_name='Scaffold', query=None, values=['dH', 'Tm'], flatten_col=True, seq_only=False):
+def get_element_fingerprint(arr, scaffold_name='Scaffold', query=None, values=['dH', 'Tm'], 
+                            flatten_col=True, seq_only=False, return_new_arr=False):
     """
     Returns the element by feature matrix and a mask for the nans
     """
@@ -59,9 +66,11 @@ def get_element_fingerprint(arr, scaffold_name='Scaffold', query=None, values=['
     
     if flatten_col:
         element_fingerprint.columns = ['_'.join(col) for col in element_fingerprint.columns.values]
-
-        
-    return element_fingerprint
+    
+    if return_new_arr:
+        return element_fingerprint, arr
+    else:    
+        return element_fingerprint
     
     
 def ward_cluster(mat_df, t, criterion='maxclust', split_Tm_dH=True, ax=None):
@@ -78,10 +87,11 @@ def ward_cluster(mat_df, t, criterion='maxclust', split_Tm_dH=True, ax=None):
     
     
     if split_Tm_dH:
+        n = int(mat_df.shape[1] / 2)
         pltargs = dict(row_linkage=Z, row_colors=cluster_color_list, col_cluster=False)
-        clustergrid = sns.clustermap(mat_df.iloc[:,:2], mask=mask.iloc[:,:2], 
+        clustergrid = sns.clustermap(mat_df.iloc[:,:n], mask=mask.iloc[:,:n], 
                                     cmap='viridis', **pltargs)
-        sns.clustermap(mat_df.iloc[:,2:4], mask=mask.iloc[:,2:4], cmap='cividis', **pltargs)
+        sns.clustermap(mat_df.iloc[:,n:2*n], mask=mask.iloc[:,n:2*n], cmap='cividis', **pltargs)
     else:
         pltargs = dict(row_linkage=Z, row_colors=cluster_color_list, col_cluster=True)
         clustergrid = sns.clustermap(mat_df, mask=mask, cmap='cividis', **pltargs)

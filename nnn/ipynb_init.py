@@ -3,6 +3,7 @@ import pandas as pd
 from scipy import stats
 
 import matplotlib.pyplot as plt
+import matplotlib
 from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
                                AutoMinorLocator)
 import seaborn as sns
@@ -14,10 +15,14 @@ from RiboGraphViz import LoopExtruder, StackExtruder
 from ipynb.draw import draw_struct
 import nupack
 import sklearn
+from scipy import stats
 from scipy.stats import pearsonr
 from sklearn.metrics import r2_score
 
-from nnn import util, fileio, processing, plotting, simulation, dG_fit, uv, mupack, modeling
+from tqdm import tqdm
+import itertools
+
+from nnn import util, fileio, mupack, plotting, processing, uv, variance
 import nnn.motif_fit as mf
 from nnn.arraydata import ArrayData
 
@@ -34,6 +39,7 @@ label_font_size = 6
 
 sns.set_style('ticks')
 sns.set_context('paper')
+matplotlib.rc('axes',edgecolor='k')
 
 # make sure the text is editable in illustrator
 import matplotlib
