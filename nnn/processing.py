@@ -140,9 +140,9 @@ def combine_replicate_p_unfold(p_unfold_dict, celsius_dict):
             df = p_unfold_dict[rep_name][['%s_%.1f'%(rep_name, x) for x in celsius_list]]
         else:
             df = df.join(p_unfold_dict[rep_name][['%s_%.1f'%(rep_name, x) for x in celsius_list]], how='outer')
-            
+    
     p_unfold = np.nanmean(
-        df.values.reshape(-1, 3,len(celsius_dict[repmax])),
+        df.values.reshape(-1, len(celsius_dict), len(celsius_dict[repmax])),
         axis=1)
     return pd.DataFrame(data=p_unfold, columns=celsius_list, index=df.index)
     

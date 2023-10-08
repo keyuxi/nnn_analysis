@@ -45,10 +45,17 @@ def plot_colored_scatter_comparison(data, x, y,
     if ax is None:
         fig, ax = plt.subplots(figsize=(6,5))
 
-    if lim is not None:
-        ax.plot(lim, lim, '--', zorder=0, color=[.9,.9,.9])
-        ax.set_xlim(lim)
-        ax.set_ylim(lim)
+    if lim is None:
+        # auto lim calculation
+        margin = .5
+        ll = min(np.percentile(data[x].dropna(), 1), np.percentile(data[y].dropna(), 1))
+        ul = max(np.percentile(data[x].dropna(), 99), np.percentile(data[y].dropna(), 99))
+        r = ul - ll
+        lim = [ll - r * margin, ul + r * margin]
+
+    ax.plot(lim, lim, '--', zorder=0, color=[.9,.9,.9])
+    ax.set_xlim(lim)
+    ax.set_ylim(lim)
 
     df = data.copy()
     
@@ -65,7 +72,7 @@ def plot_colored_scatter_comparison(data, x, y,
     else:
         show_cbar = False
         sns.scatterplot(data=df, x=x, y=y, size=.1,
-                        palette=palette, alpha=alpha, legend=False, ax=ax, rasterized=rasterized, **kwargs)
+                        palette=palette, alpha=alpha, ax=ax, legend=False, rasterized=rasterized, **kwargs)
         
         
     sns.despine()

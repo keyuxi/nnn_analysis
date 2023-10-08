@@ -142,6 +142,7 @@ class ArrayData(object):
             self.celsius[rep] = np.array([float(x.split('_')[1]) for x in curves[rep].columns])
 
         p_unfold_dict = {rep_name: self.calc_p_unfold(rep_name, rep, cond) for rep, rep_name, cond in zip(reps, self.replicate_df['name'], conds)}
+        # print(self.celsius)
         p_unfold = processing.combine_replicate_p_unfold(p_unfold_dict, self.celsius)
         return data, curves, curves_se, p_unfold
         

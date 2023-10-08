@@ -5,6 +5,7 @@ from collections import defaultdict
 from typing import List, Tuple
 from datetime import datetime
 import os
+import itertools
 
 from . import fileio, util, plotting
 
@@ -114,20 +115,24 @@ def coef_dict_2_df(coef_dict):
     
     
 def get_fixed_params(param_set_template_file:str, fixed_pclass:List[str],
-                     features_not_fixed:List[str]=None) -> Tuple[pd.DataFrame, List[str]]:
+                     features_not_fixed:List[str]=None, return_full_coef_df=False) -> Tuple[pd.DataFrame, List[str]]:
     """
     Gets the params in `param_set_template_file` that starts with a str in `fixed_pclass`.
     Returns:
         fixed_coef_df - dataframe, contains the values for the fixed parameters
+        return_full_coef_df - if True, return all coef. Useful for regularized fitting with prior
     """
     param_set_dict = fileio.read_json(param_set_template_file)
     
     ori_coef_df = pd.concat((coef_dict_2_df(param_set_dict['dH']), coef_dict_2_df(param_set_dict['dG'])), axis=1)
     ori_coef_df.columns = ['dH', 'dG']
 
-    fixed_coef_df = ori_coef_df.loc[[x for x in ori_coef_df.index if x.split('#')[0] in fixed_pclass]]
-    if features_not_fixed is not None:
-        fixed_coef_df.drop(labels=features_not_fixed, inplace=True)
+    if return_full_coef_df:
+        fixed_coef_df = ori_coef_df.copy()
+    else:
+        fixed_coef_df = ori_coef_df.loc[[x for x in ori_coef_df.index if x.split('#')[0] in fixed_pclass]]
+        if features_not_fixed is not None:
+            fixed_coef_df.drop(labels=features_not_fixed, inplace=True)
         
     fixed_coef_df.fillna(0, inplace=True)
     fixed_feature_names = fixed_coef_df.index.tolist()
@@ -219,9 +224,12 @@ def lr_dict_2_nupack_json(lr_dict:util.LinearRegressionSVD, template_file:str, o
 
         param_set_dict = update_template_dict(ori_param_set_dict, param_set_dict)
         
-        ### Populate the loopup tables ###
+        ### Populate the lookup tables ###
         for p in param_name_dict:
-            for n1,n2 in [(1,1), (1,2), (2,2)]:
+            coef_p_dict = coef_df_2_dict(lr_dict[p].coef_df)
+        
+            # `interior_n1_n2` (mismatches)
+            for n1, n2 in [(1,1), (1,2), (2,2)]:
                 interior_name = 'interior_%d_%d' % (n1, n2)
                 for seq in param_set_dict[p][interior_name]:
                     seq1, seq2 = seq[:n1+2], seq[n1+2:]
@@ -230,7 +238,33 @@ def lr_dict_2_nupack_json(lr_dict:util.LinearRegressionSVD, template_file:str, o
                     new_value = param_set_dict[p]['interior_size'][n1+n2-1] + \
                         param_set_dict[p]['interior_mismatch'][mm1] + \
                         param_set_dict[p]['interior_mismatch'][mm2]
+                    if n1 == 1 and n2 == 1:
+                        mm_stacks = seq1[0] + seq1[-1] + seq2[0] + seq2[-1]
+                        try:
+                            new_value += coef_p_dict['interior_mismatch_stacks'][mm_stacks]
+                        except:
+                            pass
                     param_set_dict[p][interior_name][seq] = new_value
+                    
+            loop_size_dict = dict(triloop=3, tetraloop=4)
+            for loop_size in loop_size_dict:
+                hairpin_name = 'hairpin_' + loop_size
+                
+                loop_seqs = [''.join(x) + util.rcompliment(x[0]) # iterate all possible loop sequences
+                              for x in itertools.product(list('ATCG'), repeat=loop_size_dict[loop_size] + 1)]
+                for seq in loop_seqs:
+                    hp_mm = seq[-2:] + seq[:2]
+                    loop_mid = seq[2:-2]
+                    # `hairpin_loop_mid` is an intermediate parameter not in the final file
+                    hp_value = coef_p_dict['hairpin_loop_mid'][loop_mid]
+                    if loop_size == 'triloop':
+                        # NUPACK adds hairpin_mismatch on top of hairpin_tetraloop but not for triloop
+                        # sort of funny
+                        # also takes out terminal penalty
+                        hp_value += param_set_dict[p]['hairpin_mismatch'][hp_mm]
+                        hp_value -= param_set_dict[p]['terminal_penalty'][seq[-1]+seq[0]]
+                        
+                    param_set_dict[p][hairpin_name][seq] = hp_value
                     
     elif lr_step == 'hairpin':
         hairpin_dict = {'dH': dict(hairpin_triloop=None, hairpin_tetraloop=None),
@@ -278,3 +312,5 @@ def plot_mupack_nupack(data, x_suffix, param, lim, color_by_density=False):
     ax[0].set_title('MAE = %.2f' % mae['new'])
     ax[1].set_title('MAE = %.2f' % mae['original'])
     plt.tight_layout()
+
+

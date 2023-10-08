@@ -18,8 +18,12 @@ sns.set_context('paper')
 from matplotlib.pyplot import cycler
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap
 import matplotlib.cm
+from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
+                               AutoMinorLocator)
 from scipy.stats import chi2, pearsonr, norm
-# from lmfit.models import PowerLawModel
+from scipy import optimize as opt
+from sklearn.preprocessing import MaxAbsScaler
+
 from ipynb.draw import draw_struct
 import nupack
 from matplotlib.backends.backend_pdf import PdfPages
@@ -110,6 +114,21 @@ def get_cycle(cmap, N=None, use_index="auto"):
         colors = cmap(np.linspace(0,1,N))
         return cycler("color",colors)
 
+def beutify_all_ax(ax, **kwargs):
+    for a in ax:
+        beutify(a, **kwargs)
+        
+def beutify(ax, x_locator=None, y_locator=None):
+    sns.despine()
+    matplotlib.rc('axes',edgecolor='k', linewidth=.5)
+    ax.tick_params(colors='k', width=.5)
+    
+    if x_locator is not None:
+        ax.xaxis.set_major_locator(MultipleLocator(x_locator))
+    
+    if y_locator is not None:
+        ax.yaxis.set_major_locator(MultipleLocator(y_locator))
+
 #################
 #### General ####
 #################
@@ -140,7 +159,22 @@ def replace_at_index(s:str, newstring:str, idx:int, idy:int=np.nan):
         return s[:idx] + newstring + s[idx + 1:]
     else:
         return s[:idx] + newstring + s[idy:]
-   
+
+def get_reordered_ind(clustergrid, pivot_mat):
+    """
+    Get the new indices from sns.clustermap
+    Args:
+        clustergrid - returned object of sns.clustermap
+    """
+    reordered_index = pivot_mat.index.values[clustergrid.dendrogram_row.reordered_ind]
+    reordered_columns = pivot_mat.columns.values[clustergrid.dendrogram_col.reordered_ind]
+    return reordered_index, reordered_columns
+    
+  
+def get_index_isinlist(df, mylist):
+    return df.reset_index(names='myindex').query('myindex in @mylist').set_index('myindex')
+
+       
 ######################            
 #### NNN specific ####
 ######################
@@ -399,16 +433,27 @@ def get_seq_end_pair_prob(seq:str, celsius:float, sodium=1.0, n_pair:int=2, para
         raise ValueError("n_pair value not allowed")
 
 
-def calculate_unpaired_fraction(seq, DNA_conc, model):
+def calculate_unpaired_fraction(seq, DNA_conc, model, target_struct=None):
     '''Calculate unpaired fraction either using structure free energies'''
-
-    A = nupack.Strand(seq, name='A')
-
-    duplex = '(' * A.nt() + '+' + ')' * A.nt()
-    unpaired = '.' * A.nt() + '+' + '.' * A.nt()
+    
+    if isinstance(seq, str):
+        A = nupack.Strand(seq, name='A')
+    else:
+        A = nupack.Strand(seq[0], name='A')
+        B = nupack.Strand(seq[1], name='B')
+    
+    if target_struct is None:
+        duplex = '(' * A.nt() + '+' + ')' * A.nt()
+        unpaired = '.' * A.nt() + '+' + '.' * A.nt()
+    else:
+        duplex = target_struct
+        unpaired = target_struct.replace('(','.').replace(')','.')
 
     # secondary structure free energies
-    energies = [nupack.structure_energy([A, ~A], s, model=model) for s in (unpaired, duplex)]
+    if isinstance(A, str):
+        energies = [nupack.structure_energy([A, ~A], s, model=model) for s in (unpaired, duplex)]
+    else:
+        energies = [nupack.structure_energy([A, B], s, model=model) for s in (unpaired, duplex)]
 
     # get Boltzmann factor including the concentration of the strand species, assuming ideal solution
     factor = np.exp(-model.beta * (energies[1] - energies[0])) * DNA_conc / nupack.constants.water_molarity(model.temperature)
@@ -419,24 +464,25 @@ def calculate_unpaired_fraction(seq, DNA_conc, model):
 
     return 1 / (1 + factor) # to get fraction in the unpaired state
 
+
     
-def calculate_tm(seq, sodium, DNA_conc, param_set):
+def calculate_tm(seq, target_struct, sodium, DNA_conc, param_set):
     '''Simple Tm calculation using bisection to find where unpaired = paired population'''
 
     lo, hi = 0, 100
     get_nupack_model = lambda T: nupack.Model(material=param_set, celsius=T, sodium=sodium)
 
-    if calculate_unpaired_fraction(seq, DNA_conc, get_nupack_model(lo)) > 0.5:
+    if calculate_unpaired_fraction(seq, DNA_conc, get_nupack_model(lo), target_struct=target_struct) > 0.5:
         return lo
 
-    if calculate_unpaired_fraction(seq, DNA_conc, get_nupack_model(hi)) < 0.5:
+    if calculate_unpaired_fraction(seq, DNA_conc, get_nupack_model(hi), target_struct=target_struct) < 0.5:
         return hi
 
     while True:
         T = (lo + hi) / 2
-        unpaired = calculate_unpaired_fraction(seq, DNA_conc, get_nupack_model(T))
+        unpaired = calculate_unpaired_fraction(seq, DNA_conc, get_nupack_model(T), target_struct=target_struct)
 
-        if abs(unpaired - 0.5) < 1e-5:
+        if abs(unpaired - 0.5) < 1e-2:
             return T
         elif unpaired > 0.5:
             hi = T
@@ -535,7 +581,7 @@ class LinearRegressionSVD(LinearRegression):
         self.metrics = self.calc_metrics(X, y, y_err)
     
     
-    def calc_metrics(self, X, y, y_err):        
+    def calc_metrics(self, X, y, y_err=None):        
         """
         Returns:
             metrics - Dict[str: float], ['rsqr', 'rmse', 'dof', 'chisq', 'redchi']
@@ -546,11 +592,15 @@ class LinearRegressionSVD(LinearRegression):
         
         rsqr = 1 - ss_error / ss_total
         rmse = np.sqrt(ss_error / len(y))
+        mean_abs_error = mae(y_pred, y)
         dof = len(y) - len(self.coef_)
-        chisq = np.sum((y - y_pred.reshape(-1,1))**2 / y_err**2)
-        redchi = chisq / dof
+        if y_err is not None:
+            chisq = np.sum((y - y_pred.reshape(-1,1))**2 / y_err**2)
+            redchi = chisq / dof
+        else:
+            chisq, redchi = np.nan, np.nan
 
-        metrics = dict(rsqr=rsqr, rmse=rmse, dof=dof, chisq=chisq, redchi=redchi)
+        metrics = dict(rsqr=rsqr, rmse=rmse, mae=mean_abs_error, dof=dof, chisq=chisq, redchi=redchi)
         
         return metrics
     
@@ -653,8 +703,150 @@ class LinearRegressionSVD(LinearRegression):
     def coef_se_df(self):
         return pd.DataFrame(index=self.feature_names_in_,
                             data=self.coef_se_.reshape(-1,1), columns=[self.param + '_se'])
+
+
+class LinearRegressionRegularized(LinearRegressionSVD):
+    """
+    Regularized to a set of prior parameter values.
+    Using `scipy.optimize.minimize()`
+    A wrapper class for `fit_regularized_linear_regression()` function to make life easier
+    The last feature is intercept
+    self.intercept_ is set to 0 to keep consistency
+    """
+    def __init__(self, param='dG_37', reg_lambda:float=1e-2, **kwargs):
+        """
+        Args:
+            reg_lambda - regularization scaling factor,
+                just setting the default here, can be updated in the `fit()` method
+        """
+        self.reg_lambda = reg_lambda
+        super().__init__(param=param, **kwargs)
         
-# Fluor simulation related
+    @staticmethod   
+    def fit_regularized_linear_regression(X, y, coef_p, reg_lambda):
+        def objective_func(coef, X, y, coef_p, reg_lambda):
+            """
+            X·coef = y
+            """
+            residual = X @ coef - y
+            pred_cost = np.mean(residual**2)
+            reg_cost = reg_lambda * np.mean(np.square(coef - coef_p))
+
+            return pred_cost + reg_cost
+            
+        coef0 = coef_p.copy()
+        result = opt.minimize(fun=objective_func, x0=coef0,
+                            args=(X, y, coef_p, reg_lambda),
+                            method='L-BFGS-B')
+        return result.x
+        
+    def fit(self, X:np.array, y:np.array, 
+            coef_prior=None, feature_names=None, coef_df=None,
+            reg_lambda=None, normalize_X=False):
+        """
+        Params:
+            X - (n_sample, n_feat)
+            y - (n_sample, n_dim)
+            coef_prior - (n_feat,) either provide this or `feature_names` and `coef_df`
+            feature_names - (n_feat,) list like, 
+                looks up in coef_df
+            coef_df - prior feature coefficients, 
+                index is a super set of feature_names
+        Updates:
+            self.feat_norm - (n_feat,) scaling factors for feature normalization
+                `X * self.feat_norm = X_norm`
+            self.coef_
+            self.coef_se_ (set to None)
+            self.feature_names_in_
+            self.metrics
+            * self.scaler - MaxAbsScaler() instance if `normalize_X` set to True
+                Note that MinMaxScaler() would shift the data and disturb scarcity
+                Really shouldn't use in NN model context but implemented for the remote
+                likelihood that we need it for some really skewed feature range distribution
+        """
+        # Update `self.reg_lambda` value
+        if reg_lambda is not None:
+            self.reg_lambda = reg_lambda
+            
+        # Prepare `coef_prior`
+        if coef_prior is not None:
+            assert len(coef_prior) == X.shape[1]
+        else:
+            assert (feature_names is not None) and (coef_df is not None)
+            coef_prior = coef_df.loc[feature_names,:].values.flatten()
+            print("Coef prior:")
+            
+        # Normalize X if needed
+        if normalize_X:
+            self.scaler = MaxAbsScaler()
+            X = self.scaler.fit_transform(X)
+        
+        # Fitting
+        self.coef_ = self.fit_regularized_linear_regression(X, y, coef_prior, self.reg_lambda)    
+        self.coef_se_ = None
+        self.feature_names_in_ = feature_names
+        self.metrics = self.calc_metrics(X, y)             
+        
+        
+    def fit_with_some_coef_fixed(self, X:np.array, y:np.array,
+            feature_names, fixed_feature_names, coef_df, 
+            debug=False):
+        """
+        Params:
+            X - (n_sample, n_feat)
+            y - (n_sample, n_dim)
+            feature_names - (n_feat,) list like, 
+                looks up in coef_df, has to match X.shape[1]
+            coef_df - prior feature coefficients, 
+                index is a super set of `feature_names` and `fixed_feature_names`
+                those in `fixed_feature_names` are fixed during fitting
+                those not in `fixed_feature_names` are used as prior
+        Updates:
+            self.coef_
+            self.coef_se_ (set to None bc I'm lazy)
+            self.feature_names_in_
+            self.metrics
+        """
+        assert len(feature_names) == X.shape[1]
+        known_param = [f for f in feature_names if f in fixed_feature_names]
+        unknown_param = [f for f in feature_names if not f in fixed_feature_names]
+        
+        known_param_mask = np.array([(f in fixed_feature_names) for f in feature_names], dtype=bool)
+        X_known, X_unknown = X[:, known_param_mask], X[:, ~known_param_mask]
+        if debug:
+            print('known_param_mask: ', np.sum(known_param_mask), known_param)
+            print('X_unknown, X_known: ', X_unknown.shape, X_known.shape)
+            
+        n_feature = X.shape[1]
+        
+        # coef_unknown is to be solved, here just extracted as a prior; 
+        # coef_known are the known parameters to be fixed
+        coef_known = coef_df.loc[known_param, :].values.flatten()
+        coef_unknown = coef_df.loc[unknown_param, :].values.flatten()
+        try:
+            y_tilde = (y.reshape(-1,1) - X_known @ coef_known.reshape(-1, 1)).flatten()
+        except:
+            # if debug:
+            print('shape of coef_known: ', coef_known.shape)
+            print("X_unknown, y_tilde, coef_unknown: \n", X_unknown)
+            print(y_tilde)
+            print(coef_unknown)
+
+        fitted_coef_unknown  = self.fit_regularized_linear_regression(
+            X_unknown, y_tilde, coef_p=coef_unknown, reg_lambda=self.reg_lambda)    
+        
+        if debug:
+            print('fitted_coef_unknown: ', fitted_coef_unknown)
+        
+        # Update attributes
+        self.coef_ = np.zeros(n_feature)
+        self.coef_[known_param_mask] = coef_known
+        self.coef_[~known_param_mask] = fitted_coef_unknown
+        self.coef_se_ = None
+        self.feature_names_in_ = feature_names
+        self.metrics = self.calc_metrics(X, y)
+        
+#### Fluor simulation related ####
 
 def get_fluor_distance_from_structure(structure: str):
     return len(structure) - len(structure.strip('.'))
@@ -702,3 +894,5 @@ def rmse(y1, y2):
     return np.sqrt(np.mean(np.square(y1 - y2)))
 def mae(y1, y2):
     return np.mean(np.abs(y1 - y2))
+def pearson_r(y1, y2):
+    return pearsonr(y1, y2)[0]

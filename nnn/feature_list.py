@@ -216,12 +216,16 @@ def get_feature_list(row, stack_size:int=2, sep_base_stack:bool=False, hairpin_m
         return feature_list
 
 
-def get_nupack_feature_list(row, fit_intercept:bool=False):
+def get_nupack_feature_list(row, fit_intercept:bool=False,
+                            directly_fit_3_4_hairpin_loop=True):
     """
     Parameterize the hairpins according to NUPACK parameters.
     Use NUPACK parameter terminologies in the parameter names.
     05/16/2023 Yuxi
     Args:
+        directly_fit_3_4_hairpin_loop - Bool, if False, do not directly fit 
+            hairpin_triloop or hairpin_tetraloop, but populate the field from 
+            calculation while saving to json
     """        
     sep = '#'
     hairpin_pattern = re.compile(r'^\([.]+\)') # hairpin pattern
@@ -243,17 +247,29 @@ def get_nupack_feature_list(row, fit_intercept:bool=False):
             hairpin_size = len(seq) - 2
             feature_list.append('hairpin_size%s%d' % (sep, hairpin_size))
             
-            if hairpin_size == 3:
-                terminal_bp = seq[-1] + seq[0]
-                feature_list.append('hairpin_triloop%s%s' % (sep, seq))
-                feature_list.append('terminal_penalty%s%s' % (sep, terminal_bp))
-            elif hairpin_size == 4:
-                feature_list.append('hairpin_tetraloop%s%s' % (sep, seq))
-            elif hairpin_size > 4:
+            if directly_fit_3_4_hairpin_loop:
+                if hairpin_size == 3:
+                    terminal_bp = seq[-1] + seq[0]
+                    feature_list.append('hairpin_triloop%s%s' % (sep, seq))
+                    feature_list.append('terminal_penalty%s%s' % (sep, terminal_bp))
+                elif hairpin_size == 4:
+                    feature_list.append('hairpin_tetraloop%s%s' % (sep, seq))
+                elif hairpin_size > 4:
+                    hairpin_mismatch = seq[-2:] + seq[:2]
+                    feature_list.append('hairpin_mismatch%s%s' % (sep, hairpin_mismatch))
+                else:
+                    pass
+            else:
+                # do not fit triloop/ tetraloop parameters directly
+                # but extract hairpin_mismatch parameter & hairpin loop_mid only
+                # and populate the hairpin_triloop field by calculations
                 hairpin_mismatch = seq[-2:] + seq[:2]
                 feature_list.append('hairpin_mismatch%s%s' % (sep, hairpin_mismatch))
-            else:
-                pass
+                if hairpin_size == 3 or hairpin_size == 4:
+                    hairpin_loop_mid = seq[2:-2]
+                    feature_list.append('hairpin_loop_mid%s%s' % (sep, hairpin_loop_mid))
+                
+                
                                 
         else:
             """ internal loops """
@@ -263,6 +279,7 @@ def get_nupack_feature_list(row, fit_intercept:bool=False):
         
             if ((n1 == 0) or (n2 == 0)) and (n1 + n2 != 0):
                 """ bulges """
+                # bulges are very dumbly parameterized
                 bulge_size = max(n1, n2)
                 feature_list.append('bulge_size%s%d' % (sep, bulge_size))
                 
@@ -286,6 +303,10 @@ def get_nupack_feature_list(row, fit_intercept:bool=False):
                 
                 if interior_size == 2:
                     """ 1x1 mismatch """
+                    # extra intermediate parameter for oppositing stack interaction
+                    # only for 1x1 mismatch
+                    mm_stacks = seq1[0] + seq1[-1] + seq2[0] + seq2[-1]
+                    feature_list.append('interior_mismatch_stacks%s%s' % (sep, mm_stacks))
                     feature_list.append('interior_mismatch%s%s' % (sep, mm1))
                     feature_list.append('interior_mismatch%s%s' % (sep, mm2))
                 elif interior_size > 2:

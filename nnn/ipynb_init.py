@@ -22,7 +22,7 @@ from sklearn.metrics import r2_score
 from tqdm import tqdm
 import itertools
 
-from nnn import util, fileio, mupack, plotting, processing, uv, variance
+from nnn import util, fileio, mupack, plotting, processing, uv, variance, modeling
 import nnn.motif_fit as mf
 from nnn.arraydata import ArrayData
 

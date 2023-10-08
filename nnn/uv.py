@@ -46,6 +46,18 @@ def find_blank_reference_curve_str(curve_str: str, blank_to):
         blank_curve_str = curve_str
     return blank_curve_str
 
+def format_cd_data(fn):
+    """
+    Format CD txt data to the same as from ECL
+    """
+    curve = pd.read_table(fn, header=None)
+
+    curve.columns = ['celsius', 'cd', 'v', 'absorbance']
+    curve.drop(columns = ['cd', 'v'], inplace=True)
+
+    curve.to_csv(fn.replace('.txt', '.csv'), index=False, header=None)
+    
+
 def read_curve(fn):
     curve = pd.read_csv(fn, header=None)
     curve.columns = ['celsius', 'absorbance']
@@ -253,7 +265,7 @@ def fit_param_direct(curve, Tm=None, celsius_min=5, celsius_max=95, smooth=True,
 
 
 ### Use the d_absorbance method ###
-def fit_Tm_d_absorbance(curve, celsius_min=5, celsius_max=95):
+def fit_Tm_d_absorbance(curve, celsius_min=5, celsius_max=95, whatever=False):
     """
     For a first pass before direct fit. Only fits Tm because fmax and fmin are unknown.
     """
@@ -261,7 +273,7 @@ def fit_Tm_d_absorbance(curve, celsius_min=5, celsius_max=95):
     curve_used = curve.query(f'celsius >= {celsius_min} & celsius <= {celsius_max}').sort_values(by='celsius')
     acorr_2diff = get_2nd_diff_autocorrelation(curve_used.absorbance)
 
-    if curve_used.absorbance.isnull().values.any() or np.max(np.abs(acorr_2diff)) > 0.005:
+    if (not whatever) and (curve_used.absorbance.isnull().values.any() or np.max(np.abs(acorr_2diff)) > 0.005):
         # run away fast
         # if has bad values or jumps (intervention) in the series
         return dict(is_usable=False, Tm=np.nan)
@@ -303,6 +315,9 @@ def fit_Tm_d_absorbance(curve, celsius_min=5, celsius_max=95):
         Tm = x[peaks[ind_max]]
     except:
         Tm = np.nan
+    
+    if whatever:
+        is_usable = True
         
     result_dict = dict(Tm=Tm, is_usable=is_usable, celsius_min=celsius_min, celsius_max=celsius_max)
     return result_dict
@@ -394,6 +409,68 @@ def fit_curve(fn, figdir='', verbose=False, debug=False,
         except:
             # print("Trouble with", fn)
             return dict()
+
+def fit_cd_curve(fn, figdir='', verbose=False, debug=False, 
+              **kwargs):
+    def fit():
+        curve = pd.read_table(fn, header=None)
+        curve.columns = ['celsius', 'cd', 'v', 'absorbance']
+        curve.drop(columns = ['cd', 'v'], inplace=True)
+                    
+        curve_str = os.path.splitext(os.path.split(fn)[-1])[0]
+        curve_name = dict(curve_str=curve_str,
+                          curve_name=curve_str.split('-')[1],
+                          seqid=curve_str.split('-')[0])
+        if verbose:
+            print(curve_name['curve_str'])
+        d_absorbance_result_dict = fit_Tm_d_absorbance(curve, whatever=True, **kwargs)
+        if not d_absorbance_result_dict['is_usable'] or np.isnan(d_absorbance_result_dict['Tm']):
+            print(d_absorbance_result_dict)
+            # give up fast and run away
+            raise Exception("Sorry, curve is too crazy for %s"%fn)
+            
+        Tm = d_absorbance_result_dict['Tm']
+        kwargs['celsius_max'] = d_absorbance_result_dict['celsius_max']
+        out = fit_param_direct(curve, Tm=Tm, 
+                               plot_title=curve_name, **kwargs)
+        save_fig(os.path.join(figdir, f"{curve_name['curve_str']}_direct_fit.png"))
+        # result = fit_param_d_absorbance(curve, out, plot_title=curve_name['curve_str'], **kwargs)
+        # save_fig(os.path.join(figdir, curve_name['curve_date'], f"{curve_name['curve_num']}_{curve_name['curve_name']}_d_p_unfold.png"))
+        result_dict = format_fit_result(out)
+        result_dict.update(kwargs)
+        result_dict.update(curve_name)
+        result_dict['data_file'] = fn
+        if verbose:
+            print('\tDone!')
+        return result_dict
+        
+    if debug:
+        result_dict = fit()
+        return result_dict
+    else:
+        try:
+            result_dict = fit()
+            return result_dict
+        except:
+            # print("Trouble with", fn)
+            return dict()
+
+def fit_all_cd_curves(datadir):
+    datafiles = [x for x in os.listdir(datadir) if x.endswith('.txt')]
+    
+    result_columns = ['curve_str', 'seqid', 'curve_name', 
+                'dH', 'dH_std', 'Tm', 'Tm_std', 
+                'fmax', 'fmax_std', 'fmin', 'fmin_std', 
+                's1', 's1_std', 's2', 's2_std', 'rmse',
+                'celsius_min', 'celsius_max', 'data_file']
+    result_df = pd.DataFrame(index=np.arange(len(datafiles)), columns=result_columns)
+    
+    for i,fn in enumerate(datafiles):
+        result_dict = fit_cd_curve(os.path.join(datadir,fn), figdir=os.path.join(datadir, 'fig'), 
+                        debug=True, verbose=True)
+        result_df.iloc[i, :] = result_dict
+        
+    return result_df.sort_values(by=['seqid', 'curve_name'])
    
 def make_empty_result_df(data_list, sample_sheet: pd.DataFrame, blank: bool=False):
     #----- make the index and column names for result_df -----
@@ -594,7 +671,7 @@ def agg_fit_result(uvmelt_result_file, agg_result_file, sample_sheet_file,
             
     if only_use_cooling:
         result_df['isCooling'] = result_df.curve_name.apply(lambda x: 'Cooling' in x)
-        result_df.query('isCooling')
+        result_df = result_df.query('isCooling')
     
     try:
         agg_stat = [uv, uv_std, len]

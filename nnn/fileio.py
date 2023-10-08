@@ -139,3 +139,74 @@ def read_pickle(fn):
 def write_pickle(object, fn):
     with open(fn, 'wb') as fh:
         pickle.dump(object, fh)
+        
+        
+def read_Oliveira_df(csv_file):
+    """
+    50mM NaCl, 10mM sodium phosphate, pH 7.4
+        7.5 mM Na2 + 2.5 mM Na = 17.5 mM Na+
+        17.5 mM + 50 mM = 67.5 mM Na+
+    oligo concentration 1 uM 
+    """
+    def center_2_5p_seq(x):
+        return f'CGACGTGC{x[:3]}ATGTGCTG'
+        
+    def center_2_3p_seq(x):
+        return f'CAGCACAT{x[-3:][::-1]}GCACGTCG'
+        
+    def center_2_targetstruct(center):
+        # Note seq2 is 3' to 5'
+        seq1, seq2 = center.split('/')
+        targetstruct = [['(']*3, [')']*3]
+        for i in range(3):
+            if seq1[i] != util.rcompliment(seq2[i]):
+                targetstruct[0][i] = '.'
+                targetstruct[1][-1-i] = '.'
+        
+        targetstruct = '('*8 + ''.join(targetstruct[0]) + '('*8 + '+' + ')'*8 + ''.join(targetstruct[1]) + ')'*8
+        return targetstruct
+        
+    center_df = pd.read_csv(csv_file)
+    center_df['a'] = center_df.center.apply(center_2_5p_seq)
+    center_df['b'] = center_df.center.apply(center_2_3p_seq)
+    center_df['RefSeq'] = center_df.apply(lambda row: [row.a, row.b], axis=1)
+    center_df['TargetStruct'] = center_df.center.apply(center_2_targetstruct)
+    center_df['SEQID'] = ['OV%d'%x for x in np.arange(len(center_df))]
+    center_df['sodium'] = 0.0675
+    center_df['DNA_conc'] = 1e-6
+    
+    return center_df.set_index('SEQID')[['a', 'b', 'center', 'sodium', 'DNA_conc', 'RefSeq', 'TargetStruct', 'Tm']]
+    
+    
+def read_val_df(split='val', datadir='./data'):
+    """
+    Params:
+        split - str, {'val', 'test'}
+    """
+    join_path = lambda x: os.path.join(datadir, x)
+    
+    arr_df = pd.read_csv(join_path('models/processed/arr_v1_1M_n=27732.csv'), index_col=0)
+    uv_df = pd.read_csv(join_path('models/raw/uv.csv'), index_col=0) # All validation no test
+    center_df = read_Oliveira_df(join_path('literature/Oliveira_2020_mismatches.csv'))
+    oligos348_df = pd.read_csv(join_path('literature/compiled_DNA_Tm_348oligos.csv'), index_col=0)
+    
+    arr_split_dict = read_json(join_path('models/raw/data_split.json'))
+    uv_split_dict = dict(val_ind=uv_df.index, test_ind=[])
+    center_split_dict = read_json(join_path('models/raw/data_split_Oliveira.json'))
+    oligo_split_dict = read_json(join_path('models/raw/data_split_348oligos.json'))
+    
+    arr_df['sodium'] = 1.0
+    uv_df['sodium'] = 0.088
+    
+    val_df = pd.concat(
+        (arr_df.loc[arr_split_dict[split+'_ind']],
+         uv_df.loc[uv_split_dict[split+'_ind']],
+         center_df.loc[center_split_dict[split+'_ind']],
+         oligos348_df.loc[oligo_split_dict[split+'_ind']],
+        ),
+        keys=['arr', 'uv', 'Oliveira', 'oligos348'],
+        names=['dataset', 'SEQID'],
+        axis=0
+    )
+    
+    return val_df[['RefSeq', 'TargetStruct', 'sodium', 'DNA_conc', 'dH', 'Tm', 'dG_37']]

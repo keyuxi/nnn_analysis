@@ -16,6 +16,7 @@ from sklearn.linear_model import LinearRegression, Lasso, Ridge
 
 from scipy.stats import pearsonr
 from sklearn.metrics import r2_score
+from sklearn.linear_model import PassiveAggressiveRegressor
 
 from .util import *
 from . import plotting
@@ -252,7 +253,7 @@ def compare_fit_with_santalucia(df, santa_lucia, params=['dH', 'dS', 'dG_37']):
 
     return santa_lucia
     
-def get_X_y(arr, split_dict, param, feats=None, split='train'):
+def get_X_y(arr, split_dict, param, feats=None, split='train', sample_ratio=1):
     """
     Returns:
         feats - DataFrame, needs .values when fed into LinearRegressionSVD
@@ -260,40 +261,80 @@ def get_X_y(arr, split_dict, param, feats=None, split='train'):
     assert split_dict is not None
     seqids = split_dict[split+'_ind']
     if feats is not None:
-        X = feats.loc[seqids, :].values
+        feats_inlist_df = get_index_isinlist(feats, seqids)
+        X = feats_inlist_df.values
     else:    
         feats = get_feature_count_matrix(arr, feature_method='get_feature_list', 
                                             fit_intercept=False, symmetry=False)
         X = feats.values
-    df = arr.loc[seqids, :]
+    df = arr.loc[feats_inlist_df.index,]
     y = df[param].values
     y_err = df[param+'_se'].values
     
     return dict(X=X, y=y, y_err=y_err, feature_names=feats.columns.tolist(), param=param, split=split)
     
     
-def fit_param(arr, data_split_dict, param, feats, ax, mode='val',
-              fix_some_coef=False, **fix_coef_args):
+def fit_param(arr, data_split_dict, param, feats, ax=None, mode='val',
+              fix_some_coef=False, method='svd', use_train_set_ratio=1, 
+              fix_coef_kwargs=dict(), regularization_kwargs=dict()):
     """
     Calls lr.fit() if not fix_some_coef, otherwise calls lr.fit_with_some_coef_fixed()
     Args:
-        **fix_coef_args - fixed_feature_names, coef_df are required
+        method - str, {'svd', 'regularized', 'passive_aggressive'}
+        fix_coef_kwargs - fixed_feature_names, coef_df are required
+        regularization_kwargs - `coef_prior` or (`feature_names` & `coef_df`), `reg_lambda`.
     """
     color_dict = dict(dH='c', Tm='cornflowerblue', dG_37='teal', dS='steelblue')
+    
     train_data = get_X_y(arr, data_split_dict, param=param, feats=feats, split='train')
     val_data = get_X_y(arr, data_split_dict, param=param, feats=feats, split=mode)
     
-    lr = LinearRegressionSVD()
-    if not fix_some_coef:
-        lr.fit(train_data['X'], train_data['y'], train_data['y_err'], feature_names=train_data['feature_names'],
-            skip_rank=False)
-    else:
-        lr.fit_with_some_coef_fixed(train_data['X'], train_data['y'], train_data['y_err'], feature_names=train_data['feature_names'],
-            **fix_coef_args)
+    if method == 'svd':
+        lr = LinearRegressionSVD()
+        if not fix_some_coef:
+            lr.fit(train_data['X'], train_data['y'], train_data['y_err'], feature_names=train_data['feature_names'],
+                skip_rank=False)
+        else:
+            lr.fit_with_some_coef_fixed(train_data['X'], train_data['y'], train_data['y_err'], feature_names=train_data['feature_names'],
+                **fix_coef_kwargs)
+            
+        plotting.plot_truth_predict(lr, val_data, ax=ax, title='NNN OLS model',
+                                color=color_dict[param], alpha=.05)
         
+    elif method == 'regularized':
+        lr = LinearRegressionRegularized()
+        
+        if fix_some_coef:
+            fixed_feature_names = fix_coef_kwargs['fixed_feature_names']
+        
+        # Prepare `coef_df`
+        try:
+            coef_df = fix_coef_kwargs['coef_df']
+        except:
+            coef_df = regularization_kwargs['coef_df']
+        # Add intermediate parameters not in original file and set to 0    
+        extra_coef_list = [x for x in feats.columns if not x in coef_df.index]
+        extra_coef_df = pd.DataFrame(index=extra_coef_list, data=0.0, columns=coef_df.columns)
+        coef_df = pd.concat((coef_df, extra_coef_df), axis=0)
+            
+        if 'reg_lambda' in regularization_kwargs:
+            lr.reg_lambda = regularization_kwargs['reg_lambda']
+        
+        print('Regularization strength is %f' % lr.reg_lambda)
+        
+        if not fix_some_coef:
+            lr.fit(train_data['X'], train_data['y'], feature_names=train_data['feature_names'],
+                   coef_df=coef_df)
+        else:
+            lr.fit_with_some_coef_fixed(train_data['X'], train_data['y'], 
+                                        feature_names=train_data['feature_names'], fixed_feature_names=fixed_feature_names,
+                                        coef_df=coef_df
+            )
     
-    plotting.plot_truth_predict(lr, val_data, ax=ax, title='NNN OLS model',
-                            color=color_dict[param], alpha=.05)
+    elif method == 'passive_aggressive':
+        lr = PassiveAggressiveRegressor()
+        lr.fit(train_data['X'], train_data['y'])
+         
     
     return lr
     

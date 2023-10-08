@@ -2,6 +2,8 @@ import numpy as np
 import lmfit
 import scipy.stats as st
 
+
+
 class MeltCurveModel(lmfit.Model):
     def __init__(self, *args, **kwargs):
         self.T = kwargs['T']

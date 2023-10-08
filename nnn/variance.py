@@ -392,9 +392,6 @@ def plot_variances(var, x, ax, label_text=False, legend=False):
     else:
         ax.bar(x+offset, -explained_var, label='added by model', color=palette[3], **kwargs)
         
-    # ax.bar(x, var['?'], bottom=var['bio'] - var['?'], label='unexplained', color=palette[2], **kwargs)
-    # ax.bar(x, var['bio'] - var['?'], label='explained', color=palette[0], **kwargs)
-    
     if label_text:
         ax.text(x, var['bio']+var['tech']/2, 'technical', ha='center')
         ax.text(x, var['bio']/2, 'unexplained', ha='center')
