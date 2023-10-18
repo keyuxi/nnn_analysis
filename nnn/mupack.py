@@ -20,10 +20,25 @@ def add_2_dict_val(mydict, value):
 def get_dict_mean_val(mydict):
     return np.nanmean(list(mydict.values()))
 
-def center_new_param(old_dict, new_dict):
-    new_mean = get_dict_mean_val(old_dict)
-    new_dict = add_2_dict_val(new_dict, -1 * get_dict_mean_val(new_dict))
-    new_dict = add_2_dict_val(new_dict, new_mean)
+def center_new_param(old_dict, new_dict, verbose=False):
+    """
+    Can only center one layer deep. If nested dictionary, need to call
+    this function separately for each category you want to center
+    Returns:
+        new_dict - centered `new_dict`
+    """
+    try:
+        new_mean = get_dict_mean_val(old_dict)
+        if verbose:
+            print('\tMean value of old_dict is')
+            print('\t', new_mean, '\n')
+            print('\tMean value of new_dict is')
+            print('\t', get_dict_mean_val(new_dict), '\n')
+            
+        new_dict = add_2_dict_val(new_dict, -1 * get_dict_mean_val(new_dict))
+        new_dict = add_2_dict_val(new_dict, new_mean)
+    except:
+        pass
     return new_dict
     
 """ Formatting Functions """
@@ -52,7 +67,8 @@ def update_template_dict(template_dict, coef_dict):
 
         
 
-def coef_df_2_dict(coef_df, template_dict=None):
+def coef_df_2_dict(coef_df, template_dict=None,
+                   center_new_parameters=False):
     """
     Convert lr.coef_df to a NUPACK style dictionary
     without modifying the contents
@@ -79,6 +95,14 @@ def coef_df_2_dict(coef_df, template_dict=None):
     
     # Overwrite tempate_dict
     if not template_dict is None:
+        if center_new_parameters:
+            print('Centering new parameters...')
+            for p_group in coef_dict:
+                if p_group in template_dict:
+                    print('group', p_group)
+                    coef_dict[p_group] = center_new_param(old_dict=template_dict[p_group], 
+                                             new_dict=coef_dict[p_group], verbose=True)
+            
         new_dict = update_template_dict(template_dict, coef_dict)
     else:
         new_dict = coef_dict
@@ -199,7 +223,8 @@ def get_adjusted_triloop_terminal_penalty(hairpin_triloop_dict, terminal_penalty
            
     
 def lr_dict_2_nupack_json(lr_dict:util.LinearRegressionSVD, template_file:str, out_file:str, 
-                          lr_step:str='full', adjust_triloop_terminal_penalty:bool=True,
+                          lr_step:str='full', center_new_parameters=False,
+                          adjust_triloop_terminal_penalty:bool=True,
                           extract_hairpin_mismatch:bool=False, comment=''):
     """
     Formats and saves the parameters from the final regression object to 
@@ -208,6 +233,7 @@ def lr_dict_2_nupack_json(lr_dict:util.LinearRegressionSVD, template_file:str, o
         lr_dict - Dict, keys 'dH' and 'dG', 
             values are instances of the LinearRegressionSVD() class
         lr_step - str, {'hairpin', 'full'}. If hairpin, only update the hairpin seq params
+        center_parameter - bool, if True, center the newly fitted parameters to the template category
         adjust_trilop_terminal_penalty - bool, only used when lr_step = 'hairpin', adjust the 
             terminal penalty off the hairpin_triloop parameters
         extract_hairpin_mismatch - bool, if True, fit hairpin_mismatch parameters from triloop 
@@ -219,8 +245,11 @@ def lr_dict_2_nupack_json(lr_dict:util.LinearRegressionSVD, template_file:str, o
     param_set_dict = defaultdict()
     
     if lr_step == 'full':
+        # Only centering new parameters here once as the ones in populated loopup tables are already 
+        # built on the centered ones
         for p in param_name_dict:
-            param_set_dict[p] = coef_df_2_dict(lr_dict[p].coef_df, template_dict=ori_param_set_dict[p])
+            param_set_dict[p] = coef_df_2_dict(lr_dict[p].coef_df, template_dict=ori_param_set_dict[p],
+                                               center_new_parameters=center_new_parameters)
 
         param_set_dict = update_template_dict(ori_param_set_dict, param_set_dict)
         

@@ -126,13 +126,18 @@ def get_feature_count_matrix(df, feature_method='get_stack_feature_list', featur
                         index=df.index, columns=[x.strip() for x in cv.get_feature_names_out()])
 
         # Remove features that every construct contains and is not intercept
+        if feature_style == 'nupack':
+            intercept_symbol = 'intercept#0'
+        else:
+            intercept_symbol = 'INTERCEPT'
+            
         for k in feats.keys():
-            if len(feats[k].unique())==1 and k!='INTERCEPT':
+            if len(feats[k].unique())==1 and k!=intercept_symbol:
                 feats = feats.drop(columns=[k])
                 
-        if 'INTERCEPT' in feats.columns:
-            intercept = feats.pop('INTERCEPT')
-            feats['intercept'] = intercept
+        if intercept_symbol in feats.columns:
+            intercept = feats.pop(intercept_symbol)
+            feats['intercept#intercept'] = intercept
             
 
         return feats

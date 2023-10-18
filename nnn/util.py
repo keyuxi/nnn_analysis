@@ -42,6 +42,9 @@ palette=[
     '#a3acb1']#cc.glasbey_dark
 
 complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', '-':'-'}
+N_A = 6.023 * 1e23
+R = 0.00198717 # gas constant in kcal/mol not J
+kB = 1.380649*1e-23
 
 ####################
 ##### Plotting #####
@@ -433,8 +436,9 @@ def get_seq_end_pair_prob(seq:str, celsius:float, sodium=1.0, n_pair:int=2, para
         raise ValueError("n_pair value not allowed")
 
 
-def calculate_unpaired_fraction(seq, DNA_conc, model, target_struct=None):
-    '''Calculate unpaired fraction either using structure free energies'''
+def calculate_distance_2_equilibrium(seq, DNA_conc, model, target_struct=None, verbose=False):
+    '''Calculate unpaired fraction either using structure free energies
+    '''
     
     if isinstance(seq, str):
         A = nupack.Strand(seq, name='A')
@@ -444,25 +448,39 @@ def calculate_unpaired_fraction(seq, DNA_conc, model, target_struct=None):
     
     if target_struct is None:
         duplex = '(' * A.nt() + '+' + ')' * A.nt()
-        unpaired = '.' * A.nt() + '+' + '.' * A.nt()
+        # unpaired = '.' * A.nt() + '+' + '.' * A.nt()
     else:
         duplex = target_struct
-        unpaired = target_struct.replace('(','.').replace(')','.')
+        # unpaired = target_struct.replace('(','.').replace(')','.')
 
     # secondary structure free energies
     if isinstance(A, str):
-        energies = [nupack.structure_energy([A, ~A], s, model=model) for s in (unpaired, duplex)]
+        # energies = [nupack.structure_energy([A, ~A], s, model=model) for s in (unpaired, duplex)]
+        energy = nupack.structure_energy([A, ~A], duplex, model=model)
     else:
-        energies = [nupack.structure_energy([A, B], s, model=model) for s in (unpaired, duplex)]
+        # energies = [nupack.structure_energy([A, B], s, model=model) for s in (unpaired, duplex)]
+        energy = nupack.structure_energy([A, B], duplex, model=model)
 
-    # get Boltzmann factor including the concentration of the strand species, assuming ideal solution
-    factor = np.exp(-model.beta * (energies[1] - energies[0])) * DNA_conc / nupack.constants.water_molarity(model.temperature)
+    if verbose:
+        print('dG =', energy)
+    
+    # get reaction quotient Q
+    # factor = np.exp(-model.beta * (energies[1] - energies[0])) * DNA_conc / nupack.constants.water_molarity(model.temperature)
+    lnQ = - energy * model.beta
+    if verbose:
+        print('lnQ =', lnQ)
 
     # structure free energies are assuming distinguishable strands, so if homodimer need to divide by 2 for indistinguishability
+    # Equilibrium constant is affected by whether the strands are distinguishable
+    # If identical strands, K = 1/conc; if non-identical strands, K = 2/conc
     if str(A) == str(~A):
-        factor /= 2
-
-    return 1 / (1 + factor) # to get fraction in the unpaired state
+        lnK = np.log(1/DNA_conc)
+    else:
+        lnK = np.log(2/DNA_conc)
+        
+    if verbose:
+        print('lnK =', lnK)
+    return lnQ - lnK # to get the difference of reaction quotient to equilibrium constant
 
 
     
@@ -472,19 +490,19 @@ def calculate_tm(seq, target_struct, sodium, DNA_conc, param_set):
     lo, hi = 0, 100
     get_nupack_model = lambda T: nupack.Model(material=param_set, celsius=T, sodium=sodium)
 
-    if calculate_unpaired_fraction(seq, DNA_conc, get_nupack_model(lo), target_struct=target_struct) > 0.5:
+    if calculate_distance_2_equilibrium(seq, DNA_conc, get_nupack_model(lo), target_struct=target_struct) < 0:
         return lo
 
-    if calculate_unpaired_fraction(seq, DNA_conc, get_nupack_model(hi), target_struct=target_struct) < 0.5:
+    if calculate_distance_2_equilibrium(seq, DNA_conc, get_nupack_model(hi), target_struct=target_struct) > 0:
         return hi
 
     while True:
         T = (lo + hi) / 2
-        unpaired = calculate_unpaired_fraction(seq, DNA_conc, get_nupack_model(T), target_struct=target_struct)
+        Q_K = calculate_distance_2_equilibrium(seq, DNA_conc, get_nupack_model(T), target_struct=target_struct)
 
-        if abs(unpaired - 0.5) < 1e-2:
+        if abs(Q_K) < 1e-2:
             return T
-        elif unpaired > 0.5:
+        elif Q_K < 0:
             hi = T
         else:
             lo = T

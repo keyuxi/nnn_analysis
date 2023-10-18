@@ -330,7 +330,8 @@ def get_nupack_feature_list(row, fit_intercept:bool=False,
                 
     
     if fit_intercept:
-        return feature_list + ['intercept']
+        # make the format recognizable to reg expression
+        return feature_list + ['intercept#0']
     else:
         return feature_list
         
